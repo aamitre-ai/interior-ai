@@ -1,5 +1,6 @@
 import Replicate from "replicate";
 import { NextRequest, NextResponse } from "next/server";
+import sharp from "sharp";
 
 const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
 
@@ -23,33 +24,14 @@ async function generateMask(width: number, height: number): Promise<string> {
 
   // Convert SVG to base64 PNG using canvas-compatible approach
   // On server we use Buffer directly
-  return Buffer.from(svg).toString("base64");
-}
+  const png = await sharp(svg).png().toBuffer();
+  return png.toString("base64");
+  }
 
 async function getImageSize(base64: string): Promise<{ width: number; height: number }> {
-  // Parse dimensions from JPEG/PNG header without sharp
-  const buf = Buffer.from(base64, "base64");
-  // PNG: width at bytes 16-19, height at 20-23
-  if (buf[0] === 0x89 && buf[1] === 0x50) {
-    return {
-      width: buf.readUInt32BE(16),
-      height: buf.readUInt32BE(20),
-    };
-  }
-  // JPEG: scan for SOF marker
-  let i = 2;
-  while (i < buf.length) {
-    if (buf[i] === 0xff && (buf[i + 1] & 0xf0) === 0xc0 && buf[i + 1] !== 0xff) {
-      if ([0xc0, 0xc1, 0xc2].includes(buf[i + 1])) {
-        return {
-          height: buf.readUInt16BE(i + 5),
-          width: buf.readUInt16BE(i + 7),
-        };
-      }
-    }
-    i++;
-  }
-  return { width: 1024, height: 768 };
+    const buf = Buffer.from(base64, "base64");
+      const meta = await sharp(buf).metadata();
+        return { width: meta.width ?? 1024, height: meta.height ?? 768 };
 }
 
 export async function POST(req: NextRequest) {
