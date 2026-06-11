@@ -24,7 +24,7 @@ async function generateMask(width: number, height: number): Promise<string> {
 
   // Convert SVG to base64 PNG using canvas-compatible approach
   // On server we use Buffer directly
-  const png = await sharp(svg).png().toBuffer();
+    const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return png.toString("base64");
   }
 
