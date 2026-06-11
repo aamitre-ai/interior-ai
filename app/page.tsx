@@ -107,6 +107,7 @@ export default function Home() {
   const [step, setStep] = useState<Step>("idle");
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingStatus, setLoadingStatus] = useState("");
 
   const handleRoomFile = (file: File) => {
     setRoomFile(file);
@@ -119,45 +120,62 @@ export default function Home() {
     setFurnitureUrl("");
   };
 
+  const pollForResult = async (predictionId: string): Promise<string> => {
+    const messages = [
+      "Iniciando modelo de IA...",
+      "Procesando imagen...",
+      "Generando render...",
+      "Casi listo...",
+    ];
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const idx = i < 3 ? 0 : i < 8 ? 1 : i < 15 ? 2 : 3;
+      setLoadingStatus(messages[idx]);
+      const res = await fetch(`/api/status?id=${predictionId}`);
+      const data = await res.json();
+      if (data.status === "succeeded") return data.imageUrl;
+      if (data.status === "failed") throw new Error(data.error ?? "La generacion fallo");
+    }
+    throw new Error("Tiempo de espera agotado (2 min)");
+  };
+
   const generate = async () => {
-    if (!roomFile) { setError("Sube una foto de tu habitación primero."); return; }
+    if (!roomFile) { setError("Sube una foto de tu habitacion primero."); return; }
     if (!furnitureFile && !furnitureUrl.trim()) { setError("Sube una imagen del mueble o pega su URL."); return; }
 
     setStep("loading");
     setError(null);
     setResult(null);
+    setLoadingStatus("Preparando imagenes...");
 
     try {
       const roomBase64 = await compressImage(roomFile, 1024, 0.8);
       const furnitureBase64 = furnitureFile ? await compressImage(furnitureFile, 768, 0.8) : null;
 
-      const body = {
-        roomBase64,
-        furnitureBase64,
-        furnitureUrl: furnitureUrl.trim() || null,
-        userPrompt: userPrompt.trim() || "Place the furniture naturally in the room",
-      };
-
+      setLoadingStatus("Enviando al servidor...");
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          roomBase64,
+          furnitureBase64,
+          furnitureUrl: furnitureUrl.trim() || null,
+          userPrompt: userPrompt.trim() || "Place the furniture naturally in the room",
+        }),
       });
 
-      const text = await res.text();
-      let data: GenerateResult & { error?: string };
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(`Error del servidor: ${text.slice(0, 200)}`);
-      }
-
+      const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Error desconocido");
-      setResult(data);
+
+      setLoadingStatus("Iniciando modelo de IA...");
+      const imageUrl = await pollForResult(data.predictionId);
+      setResult({ imageUrl, promptUsed: data.promptUsed ?? "" });
       setStep("done");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error inesperado");
       setStep("error");
+    } finally {
+      setLoadingStatus("");
     }
   };
 
@@ -166,14 +184,14 @@ export default function Home() {
       <header className="text-center max-w-xl">
         <h1 className="text-3xl font-bold tracking-tight mb-2">Interior AI</h1>
         <p className="text-white/50 text-sm leading-relaxed">
-          Sube una foto de tu habitación, elige un mueble y visualiza cómo quedaría.
+          Sube una foto de tu habitacion, elige un mueble y visualiza como quedaria.
         </p>
       </header>
 
       <div className="w-full max-w-2xl bg-white/5 border border-white/10 rounded-3xl p-6 flex flex-col gap-6">
         <section className="flex flex-col gap-2">
-          <Label number={1} text="Foto de tu habitación" />
-          <UploadZone label="Sube la foto de tu habitación" accept="image/*" preview={roomPreview} onFile={handleRoomFile} />
+          <Label number={1} text="Foto de tu habitacion" />
+          <UploadZone label="Sube la foto de tu habitacion" accept="image/*" preview={roomPreview} onFile={handleRoomFile} />
         </section>
 
         <section className="flex flex-col gap-2">
@@ -194,12 +212,12 @@ export default function Home() {
         </section>
 
         <section className="flex flex-col gap-2">
-          <Label number={3} text="Describe cómo colocarlo (opcional)" />
+          <Label number={3} text="Describe como colocarlo (opcional)" />
           <input
             type="text"
             value={userPrompt}
             onChange={(e) => setUserPrompt(e.target.value)}
-            placeholder='Ej: "Pon el sofá verde contra la pared izquierda"'
+            placeholder="Ej: Pon el sofa verde contra la pared izquierda"
             className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/15 text-sm placeholder:text-white/25 focus:outline-none focus:border-white/40 transition"
           />
         </section>
@@ -213,7 +231,11 @@ export default function Home() {
           disabled={step === "loading"}
           className="w-full py-3.5 rounded-xl font-semibold text-sm bg-white text-black hover:bg-white/90 active:scale-[0.98] transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
-          {step === "loading" ? (<><Spinner />Generando render… puede tardar ~30 s</>) : ("✨ Generar Render")}
+          {step === "loading" ? (
+            <><Spinner />{loadingStatus || "Generando..."}</>
+          ) : (
+            "✨ Generar Render"
+          )}
         </button>
       </div>
 
