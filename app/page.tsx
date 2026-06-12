@@ -8,6 +8,7 @@ interface FurnitureItem {
   name: string;
   thumbnail: string;
   fabricObj: any;
+  direction?: string;
 }
 
 export default function HomePage() {
@@ -36,39 +37,58 @@ export default function HomePage() {
     let mounted = true;
     import("fabric").then((mod) => {
       if (!mounted) return;
-      const fabric = (mod as any).fabric || mod;
+      // Handle CJS default, ESM named export, and UMD interop
+      const fabric = (mod as any).fabric
+        ?? (mod as any).default?.fabric
+        ?? (mod as any).default
+        ?? mod;
       fabricRef.current = fabric;
 
-      const canvas = new fabric.Canvas(canvasRef.current, {
-        width: 880,
-        height: 580,
-        backgroundColor: "#111118",
-        preserveObjectStacking: true,
-      });
-      canvasObjRef.current = canvas;
+      if (!fabric?.Canvas) {
+        setErrorMsg("No se pudo cargar Fabric.js. Recarga la página.");
+        return;
+      }
+      if (!canvasRef.current) {
+        setErrorMsg("Canvas no encontrado. Recarga la página.");
+        return;
+      }
 
-      canvas.on("selection:created", (e: any) => {
-        const obj = e.selected?.[0];
-        if (obj) updateSelectedState(obj);
-      });
-      canvas.on("selection:updated", (e: any) => {
-        const obj = e.selected?.[0];
-        if (obj) updateSelectedState(obj);
-      });
-      canvas.on("selection:cleared", () => {
-        setSelected(null);
-      });
-      canvas.on("object:scaling", (e: any) => {
-        if (e.target) {
-          const s = Math.round(((e.target.scaleX || 1) / (e.target.data?.baseScale || 1)) * 100);
-          setScaleVal(s);
-        }
-      });
-      canvas.on("object:rotating", (e: any) => {
-        if (e.target) setRotateVal(Math.round(e.target.angle || 0));
-      });
+      try {
+        const canvas = new fabric.Canvas(canvasRef.current, {
+          width: 880,
+          height: 580,
+          backgroundColor: "#111118",
+          preserveObjectStacking: true,
+        });
+        canvasObjRef.current = canvas;
 
-      setIsReady(true);
+        canvas.on("selection:created", (e: any) => {
+          const obj = e.selected?.[0];
+          if (obj) updateSelectedState(obj);
+        });
+        canvas.on("selection:updated", (e: any) => {
+          const obj = e.selected?.[0];
+          if (obj) updateSelectedState(obj);
+        });
+        canvas.on("selection:cleared", () => {
+          setSelected(null);
+        });
+        canvas.on("object:scaling", (e: any) => {
+          if (e.target) {
+            const s = Math.round(((e.target.scaleX || 1) / (e.target.data?.baseScale || 1)) * 100);
+            setScaleVal(s);
+          }
+        });
+        canvas.on("object:rotating", (e: any) => {
+          if (e.target) setRotateVal(Math.round(e.target.angle || 0));
+        });
+
+        setIsReady(true);
+      } catch (err: any) {
+        setErrorMsg("Error al inicializar canvas: " + (err?.message || String(err)));
+      }
+    }).catch((err: any) => {
+      if (mounted) setErrorMsg("Error al cargar Fabric.js: " + (err?.message || String(err)));
     });
 
     return () => {
@@ -268,10 +288,14 @@ export default function HomePage() {
       const imageBase64 = getCompressedImage(1.5);
 
       setProcessingMsg("Iniciando render IA...");
+      const furnitureContext = furniture
+        .filter(f => f.direction)
+        .map(f => `${f.name}: ${f.direction}`)
+        .join(", ");
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64 }),
+        body: JSON.stringify({ imageBase64, furnitureContext }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -393,7 +417,12 @@ export default function HomePage() {
                       }`}
                     >
                       <img src={item.thumbnail} alt={item.name} className="w-8 h-8 object-contain flex-shrink-0" />
-                      <span className="text-xs text-gray-300 truncate">{item.name}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-gray-300 truncate block">{item.name}</span>
+                        {item.direction && (
+                          <span className="text-xs text-blue-400 truncate block">↳ {item.direction}</span>
+                        )}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -455,6 +484,23 @@ export default function HomePage() {
                   </div>
                 </div>
 
+                {/* Direction / note */}
+                <div>
+                  <div className="text-xs text-gray-400 mb-1">Dirección / nota</div>
+                  <input
+                    type="text"
+                    placeholder="ej. mira hacia la TV"
+                    value={furniture.find(f => f.fabricObj === selected)?.direction ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFurniture(prev => prev.map(f =>
+                        f.fabricObj === selected ? { ...f, direction: val } : f
+                      ));
+                    }}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600"
+                  />
+                </div>
+
                 {/* Quick actions */}
                 <div className="flex flex-wrap gap-1">
                   <button onClick={flipHorizontal} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">↔ Voltear</button>
@@ -512,49 +558,4 @@ export default function HomePage() {
                 ← Volver al editor
               </button>
             )}
-          </div>
-        </aside>
-
-        {/* Canvas area */}
-        <main className="flex-1 flex items-center justify-center bg-gray-950 overflow-hidden p-4">
-          {renderedUrl ? (
-            <div className="relative max-w-full max-h-full">
-              <img
-                src={renderedUrl}
-                alt="Render fotorrealista"
-                className="max-w-full max-h-[calc(100vh-120px)] rounded-xl shadow-2xl object-contain"
-              />
-              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur rounded-lg px-3 py-1.5 text-xs text-green-400 font-semibold">
-                ✓ Render completado
-              </div>
-            </div>
-          ) : (
-            <div className="relative">
-              <canvas ref={canvasRef} className="rounded-xl shadow-2xl" />
-              {!roomLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-center text-gray-600">
-                    <div className="text-6xl mb-3">🏠</div>
-                    <p className="text-base font-medium">Sube una foto de la habitación vacía</p>
-                    <p className="text-sm mt-1 text-gray-700">Luego añade muebles desde el panel izquierdo</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </main>
-      </div>
-
-      {/* Processing overlay */}
-      {isProcessing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 text-center max-w-xs shadow-2xl">
-            <div className="text-4xl mb-4 animate-pulse">✨</div>
-            <p className="text-white font-semibold text-base">{processingMsg}</p>
-            <p className="text-gray-400 text-sm mt-2">Por favor espera...</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        
