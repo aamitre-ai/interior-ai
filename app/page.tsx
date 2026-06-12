@@ -546,4 +546,15 @@ export default function HomePage() {
       </div>
 
       {/* Processing overlay */}
-      {isProcessing &&
+      {isProcessing && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 text-center max-w-xs shadow-2xl">
+            <div className="text-4xl mb-4 animate-pulse">✨</div>
+            <p className="text-white font-semibold text-base">{processingMsg}</p>
+            <p className="text-gray-400 text-sm mt-2">Por favor espera...</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
