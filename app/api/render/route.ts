@@ -9,27 +9,33 @@ const SDXL_VERSION = "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c92
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64 } = await req.json();
+    const { imageBase64, furnitureContext } = await req.json();
 
     if (!imageBase64) {
       return NextResponse.json({ error: "No se recibió imagen" }, { status: 400 });
     }
 
     if (!process.env.REPLICATE_API_TOKEN) {
-      return NextResponse.json({ error: "REPLICATE_API_TOKEN no configurado en Vercel" }, { status: 500 });
+      return NextResponse.json({ error: "REPLICATE_API_TOKEN no está configurado en Vercel" }, { status: 500 });
     }
 
+    // Normalize to JPEG data URI
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
     const imageUri = `data:image/jpeg;base64,${base64Data}`;
+
+    const basePrompt =
+      "photorealistic interior design photograph, professional real estate photography, " +
+      "realistic lighting, natural shadows, high quality, 8k resolution, ultra detailed, " +
+      "architectural photography, interior design magazine";
+    const prompt = furnitureContext
+      ? `${basePrompt}, ${furnitureContext}`
+      : basePrompt;
 
     const prediction = await replicate.predictions.create({
       version: SDXL_VERSION,
       input: {
         image: imageUri,
-        prompt:
-          "photorealistic interior design photograph, professional real estate photography, " +
-          "realistic lighting, natural shadows, high quality, 8k resolution, ultra detailed, " +
-          "architectural photography, interior design magazine",
+        prompt,
         negative_prompt:
           "cartoon, illustration, painting, drawing, blurry, low quality, watermark, " +
           "text, extra objects, different furniture, distorted, unrealistic",
@@ -42,9 +48,9 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ predictionId: prediction.id });
-  } catch (error) {
-    const msg = (error instanceof Error) ? error.message : String(error);
-    console.error("[render]", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (error: any) {
+    const message = error?.message || error?.detail || String(error);
+    console.error("[render] Error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-      }
+}
