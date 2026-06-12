@@ -558,4 +558,49 @@ export default function HomePage() {
                 ← Volver al editor
               </button>
             )}
-        
+          </div>
+        </aside>
+
+        {/* Canvas area */}
+        <main className="flex-1 flex items-center justify-center bg-gray-950 overflow-hidden p-4">
+          {renderedUrl ? (
+            <div className="relative max-w-full max-h-full">
+              <img
+                src={renderedUrl}
+                alt="Render fotorrealista"
+                className="max-w-full max-h-[calc(100vh-120px)] rounded-xl shadow-2xl object-contain"
+              />
+              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur rounded-lg px-3 py-1.5 text-xs text-green-400 font-semibold">
+                ✓ Render completado
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <canvas ref={canvasRef} className="rounded-xl shadow-2xl" />
+              {!roomLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center text-gray-600">
+                    <div className="text-6xl mb-3">🏠</div>
+                    <p className="text-base font-medium">Sube una foto de la habitación vacía</p>
+                    <p className="text-sm mt-1 text-gray-700">Luego añade muebles desde el panel izquierdo</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Processing overlay */}
+      {isProcessing && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 text-center max-w-xs shadow-2xl">
+            <div className="text-4xl mb-4 animate-pulse">✨</div>
+            <p className="text-white font-semibold text-base">{processingMsg}</p>
+            <p className="text-gray-400 text-sm mt-2">Por favor espera...</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
