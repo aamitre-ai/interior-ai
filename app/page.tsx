@@ -12,7 +12,7 @@ interface FurnitureItem {
 }
 
 export default function HomePage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<any>(null);
   const canvasObjRef = useRef<any>(null);
   const [isReady, setIsReady] = useState(false);
@@ -54,7 +54,13 @@ export default function HomePage() {
       }
 
       try {
-        const canvas = new fabric.Canvas(canvasRef.current, {
+        // Create canvas element imperatively so React never manages it directly.
+        // Fabric.js wraps it in .canvas-container, which would break React's
+        // removeChild reconciliation if React owned the <canvas> node.
+        const el = document.createElement("canvas");
+        canvasRef.current.appendChild(el);
+
+        const canvas = new fabric.Canvas(el, {
           width: 880,
           height: 580,
           backgroundColor: "#111118",
@@ -576,7 +582,7 @@ export default function HomePage() {
             </div>
           ) : (
             <div className="relative">
-              <canvas ref={canvasRef} className="rounded-xl shadow-2xl" />
+              <div ref={canvasRef} className="rounded-xl shadow-2xl overflow-hidden" />
               {!roomLoaded && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="text-center text-gray-600">
