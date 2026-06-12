@@ -1,282 +1,551 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
-type Step = "idle" | "loading" | "done" | "error";
-
-interface GenerateResult {
-  imageUrl: string;
-  promptUsed: string;
+interface FurnitureItem {
+  id: string;
+  name: string;
+  thumbnail: string;
+  fabricObj: any;
 }
 
-function compressImage(file: File, maxWidth = 1024, quality = 0.8): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const scale = Math.min(1, maxWidth / img.width);
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("Canvas not supported"));
-      ctx.drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      const dataUrl = canvas.toDataURL("image/jpeg", quality);
-      resolve(dataUrl.split(",")[1]);
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
-}
+export default function HomePage() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fabricRef = useRef<any>(null);
+  const canvasObjRef = useRef<any>(null);
+  const [isReady, setIsReady] = useState(false);
+  const [roomLoaded, setRoomLoaded] = useState(false);
+  const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
+  const [selected, setSelected] = useState<any>(null);
+  const [color, setColor] = useState("#FFFFFF");
+  const [colorAlpha, setColorAlpha] = useState(0);
+  const [scaleVal, setScaleVal] = useState(100);
+  const [rotateVal, setRotateVal] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMsg, setProcessingMsg] = useState("");
+  const [renderedUrl, setRenderedUrl] = useState<string | null>(null);
+  const [exportQuality, setExportQuality] = useState<"web" | "hd" | "print">("hd");
+  const [roomName, setRoomName] = useState("Sala");
+  const roomInputRef = useRef<HTMLInputElement>(null);
+  const furnitureInputRef = useRef<HTMLInputElement>(null);
 
-function UploadZone({
-  label,
-  accept,
-  preview,
-  onFile,
-}: {
-  label: string;
-  accept: string;
-  preview: string | null;
-  onFile: (file: File) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Init Fabric.js
+  useEffect(() => {
+    let mounted = true;
+    import("fabric").then((mod) => {
+      if (!mounted) return;
+      const fabric = (mod as any).fabric || mod;
+      fabricRef.current = fabric;
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const file = e.dataTransfer.files[0];
-      if (file) onFile(file);
-    },
-    [onFile]
-  );
+      const canvas = new fabric.Canvas(canvasRef.current, {
+        width: 880,
+        height: 580,
+        backgroundColor: "#111118",
+        preserveObjectStacking: true,
+      });
+      canvasObjRef.current = canvas;
 
-  return (
-    <div
-      onClick={() => inputRef.current?.click()}
-      onDrop={handleDrop}
-      onDragOver={(e) => e.preventDefault()}
-      className="relative flex flex-col items-center justify-center w-full rounded-2xl border-2 border-dashed border-white/20 bg-white/5 cursor-pointer hover:border-white/40 hover:bg-white/10 transition-all overflow-hidden"
-      style={{ minHeight: preview ? "auto" : "13rem" }}
-    >
-      {preview ? (
-        <img
-          src={preview}
-          alt="preview"
-          className="w-full h-auto max-h-72 object-contain p-2"
-        />
-      ) : (
-        <div className="flex flex-col items-center gap-2 text-white/50 select-none py-10">
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-          </svg>
-          <span className="text-sm font-medium">{label}</span>
-          <span className="text-xs">Arrastra o haz clic</span>
-        </div>
-      )}
-      {preview && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 hover:opacity-100 transition-opacity">
-          <span className="text-sm font-medium text-white">Cambiar imagen</span>
-        </div>
-      )}
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) onFile(file);
-        }}
-      />
-    </div>
-  );
-}
-
-export default function Home() {
-  const [roomFile, setRoomFile] = useState<File | null>(null);
-  const [roomPreview, setRoomPreview] = useState<string | null>(null);
-  const [furnitureFile, setFurnitureFile] = useState<File | null>(null);
-  const [furniturePreview, setFurniturePreview] = useState<string | null>(null);
-  const [furnitureUrl, setFurnitureUrl] = useState("");
-  const [userPrompt, setUserPrompt] = useState("");
-  const [step, setStep] = useState<Step>("idle");
-  const [result, setResult] = useState<GenerateResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loadingStatus, setLoadingStatus] = useState("");
-
-  const handleRoomFile = (file: File) => {
-    setRoomFile(file);
-    setRoomPreview(URL.createObjectURL(file));
-  };
-
-  const handleFurnitureFile = (file: File) => {
-    setFurnitureFile(file);
-    setFurniturePreview(URL.createObjectURL(file));
-    setFurnitureUrl("");
-  };
-
-  const pollForResult = async (predictionId: string): Promise<string> => {
-    const messages = [
-      "Iniciando modelo de IA...",
-      "Procesando imagen...",
-      "Generando render...",
-      "Casi listo...",
-    ];
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const idx = i < 3 ? 0 : i < 8 ? 1 : i < 15 ? 2 : 3;
-      setLoadingStatus(messages[idx]);
-      const res = await fetch(`/api/status?id=${predictionId}`);
-      const data = await res.json();
-      if (data.status === "succeeded") return data.imageUrl;
-      if (data.status === "failed") throw new Error(data.error ?? "La generacion fallo");
-    }
-    throw new Error("Tiempo de espera agotado (2 min)");
-  };
-
-  const generate = async () => {
-    if (!roomFile) { setError("Sube una foto de tu habitacion primero."); return; }
-    if (!furnitureFile && !furnitureUrl.trim()) { setError("Sube una imagen del mueble o pega su URL."); return; }
-
-    setStep("loading");
-    setError(null);
-    setResult(null);
-    setLoadingStatus("Preparando imagenes...");
-
-    try {
-      const roomBase64 = await compressImage(roomFile, 1024, 0.8);
-      const furnitureBase64 = furnitureFile ? await compressImage(furnitureFile, 768, 0.8) : null;
-
-      setLoadingStatus("Enviando al servidor...");
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomBase64,
-          furnitureBase64,
-          furnitureUrl: furnitureUrl.trim() || null,
-          userPrompt: userPrompt.trim() || "Place the furniture naturally in the room",
-        }),
+      canvas.on("selection:created", (e: any) => {
+        const obj = e.selected?.[0];
+        if (obj) updateSelectedState(obj);
+      });
+      canvas.on("selection:updated", (e: any) => {
+        const obj = e.selected?.[0];
+        if (obj) updateSelectedState(obj);
+      });
+      canvas.on("selection:cleared", () => {
+        setSelected(null);
+      });
+      canvas.on("object:scaling", (e: any) => {
+        if (e.target) {
+          const s = Math.round(((e.target.scaleX || 1) / (e.target.data?.baseScale || 1)) * 100);
+          setScaleVal(s);
+        }
+      });
+      canvas.on("object:rotating", (e: any) => {
+        if (e.target) setRotateVal(Math.round(e.target.angle || 0));
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Error desconocido");
+      setIsReady(true);
+    });
 
-      setLoadingStatus("Iniciando modelo de IA...");
-      const imageUrl = await pollForResult(data.predictionId);
-      setResult({ imageUrl, promptUsed: data.promptUsed ?? "" });
-      setStep("done");
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error inesperado");
-      setStep("error");
+    return () => {
+      mounted = false;
+      canvasObjRef.current?.dispose();
+    };
+  }, []);
+
+  const updateSelectedState = (obj: any) => {
+    setSelected(obj);
+    setScaleVal(Math.round(((obj.scaleX || 1) / (obj.data?.baseScale || 1)) * 100));
+    setRotateVal(Math.round(obj.angle || 0));
+  };
+
+  // Upload room photo
+  const handleRoomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !fabricRef.current || !canvasObjRef.current) return;
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const fabric = fabricRef.current;
+      const canvas = canvasObjRef.current;
+
+      fabric.Image.fromURL(dataUrl, (img: any) => {
+        const scaleX = canvas.width / img.width;
+        const scaleY = canvas.height / img.height;
+        const scale = Math.min(scaleX, scaleY);
+        img.set({ scaleX: scale, scaleY: scale, left: 0, top: 0, selectable: false, evented: false });
+        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+        setRoomLoaded(true);
+        setRenderedUrl(null);
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Upload furniture → remove bg → add to canvas
+  const handleFurnitureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !fabricRef.current || !canvasObjRef.current) return;
+    e.target.value = "";
+
+    setIsProcessing(true);
+    setProcessingMsg("Eliminando fondo...");
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const res = await fetch("/api/remove-bg", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Error al eliminar fondo");
+      }
+      const { image: noBgDataUrl } = await res.json();
+
+      const fabric = fabricRef.current;
+      const canvas = canvasObjRef.current;
+      const id = `furniture_${Date.now()}`;
+
+      fabric.Image.fromURL(noBgDataUrl, (img: any) => {
+        const maxW = canvas.width * 0.35;
+        const maxH = canvas.height * 0.5;
+        let scale = 1;
+        if (img.width > maxW) scale = maxW / img.width;
+        if (img.height * scale > maxH) scale = maxH / img.height;
+
+        img.set({
+          left: canvas.width / 2 - (img.width * scale) / 2,
+          top: canvas.height / 2 - (img.height * scale) / 2,
+          scaleX: scale,
+          scaleY: scale,
+          data: { id, baseScale: scale },
+          cornerColor: "#3b82f6",
+          cornerStrokeColor: "#1d4ed8",
+          borderColor: "#3b82f6",
+          cornerSize: 10,
+          transparentCorners: false,
+        });
+
+        canvas.add(img);
+        canvas.setActiveObject(img);
+        canvas.renderAll();
+
+        setFurniture((prev) => [...prev, { id, name: file.name.replace(/\.[^.]+$/, ""), thumbnail: noBgDataUrl, fabricObj: img }]);
+        setSelected(img);
+        setScaleVal(100);
+        setRotateVal(0);
+        setRenderedUrl(null);
+      });
+    } catch (err: any) {
+      alert("Error: " + err.message);
     } finally {
-      setLoadingStatus("");
+      setIsProcessing(false);
+      setProcessingMsg("");
     }
   };
 
+  // Select a furniture item from the list
+  const selectFurnitureItem = (item: FurnitureItem) => {
+    const canvas = canvasObjRef.current;
+    if (!canvas || !item.fabricObj) return;
+    canvas.setActiveObject(item.fabricObj);
+    canvas.renderAll();
+    updateSelectedState(item.fabricObj);
+  };
+
+  // Delete selected object
+  const deleteSelected = () => {
+    if (!selected || !canvasObjRef.current) return;
+    const id = selected.data?.id;
+    canvasObjRef.current.remove(selected);
+    canvasObjRef.current.renderAll();
+    setSelected(null);
+    if (id) setFurniture((prev) => prev.filter((f) => f.id !== id));
+    setRenderedUrl(null);
+  };
+
+  // Apply color tint
+  const applyColor = useCallback((hex: string, alpha: number) => {
+    if (!selected || !fabricRef.current || !canvasObjRef.current) return;
+    const fabric = fabricRef.current;
+    if (alpha === 0) {
+      selected.filters = [];
+    } else {
+      selected.filters = [
+        new fabric.Image.filters.BlendColor({ color: hex, mode: "tint", alpha: alpha / 100 }),
+      ];
+    }
+    selected.applyFilters();
+    canvasObjRef.current.renderAll();
+    setRenderedUrl(null);
+  }, [selected]);
+
+  // Scale selected object
+  const applyScale = (val: number) => {
+    if (!selected || !canvasObjRef.current) return;
+    const baseScale = selected.data?.baseScale || 1;
+    const newScale = (val / 100) * baseScale;
+    selected.set({ scaleX: newScale, scaleY: newScale });
+    canvasObjRef.current.renderAll();
+    setScaleVal(val);
+    setRenderedUrl(null);
+  };
+
+  // Rotate selected object
+  const applyRotate = (val: number) => {
+    if (!selected || !canvasObjRef.current) return;
+    selected.set({ angle: val });
+    canvasObjRef.current.renderAll();
+    setRotateVal(val);
+    setRenderedUrl(null);
+  };
+
+  // Flip horizontal
+  const flipHorizontal = () => {
+    if (!selected || !canvasObjRef.current) return;
+    selected.set({ flipX: !selected.flipX });
+    canvasObjRef.current.renderAll();
+    setRenderedUrl(null);
+  };
+
+  // Send to back / bring to front
+  const sendToBack = () => {
+    if (!selected || !canvasObjRef.current) return;
+    canvasObjRef.current.sendToBack(selected);
+    canvasObjRef.current.renderAll();
+  };
+  const bringToFront = () => {
+    if (!selected || !canvasObjRef.current) return;
+    canvasObjRef.current.bringToFront(selected);
+    canvasObjRef.current.renderAll();
+  };
+
+  // Compress canvas image for API
+  const getCompressedImage = (multiplier: number): string => {
+    const canvas = canvasObjRef.current;
+    const dataUrl = canvas.toDataURL({ format: "jpeg", quality: 0.92, multiplier });
+    const sizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
+    if (sizeKB > 2800) {
+      return canvas.toDataURL({ format: "jpeg", quality: 0.75, multiplier: Math.max(1, multiplier - 0.5) });
+    }
+    return dataUrl;
+  };
+
+  // Render with AI
+  const handleRender = async () => {
+    if (!canvasObjRef.current || !roomLoaded) return;
+    setIsProcessing(true);
+    setRenderedUrl(null);
+
+    try {
+      setProcessingMsg("Exportando composición...");
+      const imageBase64 = getCompressedImage(1.5);
+
+      setProcessingMsg("Iniciando render IA...");
+      const res = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64 }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Error al iniciar render");
+      }
+      const { predictionId } = await res.json();
+
+      setProcessingMsg("Procesando con IA...");
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const statusRes = await fetch(`/api/status?id=${predictionId}`);
+        const { status, imageUrl, error } = await statusRes.json();
+        if (status === "succeeded") {
+          setRenderedUrl(imageUrl);
+          break;
+        }
+        if (status === "failed" || status === "canceled") {
+          throw new Error(error || "El render falló");
+        }
+        setProcessingMsg(`Generando... (${(i + 1) * 3}s)`);
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    } finally {
+      setIsProcessing(false);
+      setProcessingMsg("");
+    }
+  };
+
+  // Download
+  const handleDownload = () => {
+    const link = document.createElement("a");
+    const multiplier = exportQuality === "print" ? 4 : exportQuality === "hd" ? 2 : 1;
+
+    if (renderedUrl) {
+      link.href = renderedUrl;
+      link.download = `staging_${roomName.toLowerCase()}_render.jpg`;
+    } else if (canvasObjRef.current) {
+      link.href = canvasObjRef.current.toDataURL({ format: "jpeg", quality: 0.95, multiplier });
+      link.download = `staging_${roomName.toLowerCase()}_${exportQuality}.jpg`;
+    }
+    link.click();
+  };
+
   return (
-    <main className="min-h-screen flex flex-col items-center px-4 py-12 gap-10">
-      <header className="text-center max-w-xl">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">Interior AI</h1>
-        <p className="text-white/50 text-sm leading-relaxed">
-          Sube una foto de tu habitacion, elige un mueble y visualiza como quedaria.
-        </p>
+    <div className="flex flex-col h-screen bg-gray-950 text-white overflow-hidden">
+      {/* Header */}
+      <header className="flex items-center justify-between px-5 py-3 bg-gray-900 border-b border-gray-800 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">🏠</span>
+          <h1 className="font-semibold text-white text-base">Home Staging AI</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">Estancia:</span>
+          <input
+            value={roomName}
+            onChange={(e) => setRoomName(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white w-28"
+          />
+        </div>
       </header>
 
-      <div className="w-full max-w-2xl bg-white/5 border border-white/10 rounded-3xl p-6 flex flex-col gap-6">
-        <section className="flex flex-col gap-2">
-          <Label number={1} text="Foto de tu habitacion" />
-          <UploadZone label="Sube la foto de tu habitacion" accept="image/*" preview={roomPreview} onFile={handleRoomFile} />
-        </section>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar */}
+        <aside className="w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto flex-shrink-0">
+          <div className="p-3 space-y-4">
 
-        <section className="flex flex-col gap-2">
-          <Label number={2} text="El mueble que quieres visualizar" />
-          <UploadZone label="Sube la imagen del mueble" accept="image/*" preview={furniturePreview} onFile={handleFurnitureFile} />
-          <div className="flex items-center gap-3 my-1">
-            <hr className="flex-1 border-white/10" />
-            <span className="text-xs text-white/30">o pega un link</span>
-            <hr className="flex-1 border-white/10" />
+            {/* Room photo */}
+            <section>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Foto de la habitación</p>
+              <button
+                onClick={() => roomInputRef.current?.click()}
+                className={`w-full border-2 border-dashed rounded-lg p-3 text-center transition-colors ${
+                  roomLoaded ? "border-green-600 bg-green-900/20" : "border-gray-600 hover:border-blue-500"
+                }`}
+              >
+                {roomLoaded ? (
+                  <div className="text-green-400 text-sm">✓ Foto cargada<br /><span className="text-gray-400 text-xs">Clic para cambiar</span></div>
+                ) : (
+                  <div className="text-gray-400 text-sm">
+                    <div className="text-2xl mb-1">📷</div>
+                    <div>Subir foto vacía</div>
+                  </div>
+                )}
+              </button>
+              <input ref={roomInputRef} type="file" accept="image/*" className="hidden" onChange={handleRoomUpload} />
+            </section>
+
+            {/* Furniture */}
+            <section>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Muebles y adornos</p>
+              <button
+                onClick={() => furnitureInputRef.current?.click()}
+                disabled={!isReady}
+                className="w-full border-2 border-dashed border-gray-600 rounded-lg p-2 text-center hover:border-green-500 transition-colors disabled:opacity-50"
+              >
+                <div className="text-gray-400 text-sm">
+                  <span className="text-lg">🪑</span>
+                  <div className="text-xs mt-1">+ Añadir mueble</div>
+                </div>
+              </button>
+              <input ref={furnitureInputRef} type="file" accept="image/*" className="hidden" onChange={handleFurnitureUpload} />
+
+              {furniture.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {furniture.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => selectFurnitureItem(item)}
+                      className={`w-full flex items-center gap-2 rounded-lg p-2 transition-colors text-left ${
+                        selected?.data?.id === item.id ? "bg-blue-900/50 border border-blue-600" : "bg-gray-800 hover:bg-gray-700"
+                      }`}
+                    >
+                      <img src={item.thumbnail} alt={item.name} className="w-8 h-8 object-contain flex-shrink-0" />
+                      <span className="text-xs text-gray-300 truncate">{item.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Controls for selected item */}
+            {selected && (
+              <section className="border-t border-gray-700 pt-3 space-y-3">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ajustes</p>
+
+                {/* Scale */}
+                <div>
+                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <span>Tamaño</span><span>{scaleVal}%</span>
+                  </div>
+                  <input
+                    type="range" min={20} max={300} value={scaleVal}
+                    onChange={(e) => applyScale(Number(e.target.value))}
+                    className="w-full accent-blue-500"
+                  />
+                </div>
+
+                {/* Rotate */}
+                <div>
+                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <span>Rotación</span><span>{rotateVal}°</span>
+                  </div>
+                  <input
+                    type="range" min={-180} max={180} value={rotateVal}
+                    onChange={(e) => applyRotate(Number(e.target.value))}
+                    className="w-full accent-blue-500"
+                  />
+                </div>
+
+                {/* Color */}
+                <div>
+                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <span>Color / Tinte</span><span>{colorAlpha}%</span>
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="color" value={color}
+                      onChange={(e) => { setColor(e.target.value); if (colorAlpha > 0) applyColor(e.target.value, colorAlpha); }}
+                      className="h-8 w-10 rounded cursor-pointer border-0 bg-transparent"
+                    />
+                    <input
+                      type="range" min={0} max={80} value={colorAlpha}
+                      onChange={(e) => { const v = Number(e.target.value); setColorAlpha(v); applyColor(color, v); }}
+                      className="flex-1 accent-blue-500"
+                    />
+                    {colorAlpha > 0 && (
+                      <button
+                        onClick={() => { setColorAlpha(0); applyColor(color, 0); }}
+                        className="text-xs text-gray-400 hover:text-white"
+                        title="Quitar color"
+                      >✕</button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick actions */}
+                <div className="flex flex-wrap gap-1">
+                  <button onClick={flipHorizontal} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">↔ Voltear</button>
+                  <button onClick={sendToBack} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">⬇ Al fondo</button>
+                  <button onClick={bringToFront} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">⬆ Al frente</button>
+                </div>
+
+                {/* Delete */}
+                <button
+                  onClick={deleteSelected}
+                  className="w-full py-1.5 bg-red-900/50 hover:bg-red-800/70 text-red-300 rounded text-xs transition-colors"
+                >
+                  🗑 Eliminar elemento
+                </button>
+              </section>
+            )}
           </div>
-          <input
-            type="url"
-            value={furnitureUrl}
-            onChange={(e) => { setFurnitureUrl(e.target.value); if (e.target.value) { setFurnitureFile(null); setFurniturePreview(null); } }}
-            placeholder="https://tienda.com/sofa.jpg"
-            className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/15 text-sm placeholder:text-white/25 focus:outline-none focus:border-white/40 transition"
-          />
-        </section>
 
-        <section className="flex flex-col gap-2">
-          <Label number={3} text="Describe como colocarlo (opcional)" />
-          <input
-            type="text"
-            value={userPrompt}
-            onChange={(e) => setUserPrompt(e.target.value)}
-            placeholder="Ej: Pon el sofa verde contra la pared izquierda"
-            className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/15 text-sm placeholder:text-white/25 focus:outline-none focus:border-white/40 transition"
-          />
-        </section>
+          {/* Bottom actions */}
+          <div className="mt-auto p-3 space-y-2 border-t border-gray-800">
+            <div>
+              <p className="text-xs text-gray-400 mb-1">Calidad de exportación</p>
+              <select
+                value={exportQuality}
+                onChange={(e) => setExportQuality(e.target.value as any)}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
+              >
+                <option value="web">Web (1x)</option>
+                <option value="hd">HD (2x)</option>
+                <option value="print">Impresión (4x)</option>
+              </select>
+            </div>
 
-        {error && (
-          <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm">{error}</div>
-        )}
+            <button
+              onClick={handleRender}
+              disabled={!roomLoaded || isProcessing}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg font-semibold text-sm transition-colors"
+            >
+              {isProcessing ? "⏳ " + processingMsg : "✨ Renderizar"}
+            </button>
 
-        <button
-          onClick={generate}
-          disabled={step === "loading"}
-          className="w-full py-3.5 rounded-xl font-semibold text-sm bg-white text-black hover:bg-white/90 active:scale-[0.98] transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {step === "loading" ? (
-            <><Spinner />{loadingStatus || "Generando..."}</>
+            <button
+              onClick={handleDownload}
+              disabled={!roomLoaded && !renderedUrl}
+              className="w-full py-2 bg-green-700 hover:bg-green-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm transition-colors"
+            >
+              ⬇ Descargar imagen
+            </button>
+
+            {renderedUrl && (
+              <button
+                onClick={() => setRenderedUrl(null)}
+                className="w-full py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs transition-colors"
+              >
+                ← Volver al editor
+              </button>
+            )}
+          </div>
+        </aside>
+
+        {/* Canvas area */}
+        <main className="flex-1 flex items-center justify-center bg-gray-950 overflow-hidden p-4">
+          {renderedUrl ? (
+            <div className="relative max-w-full max-h-full">
+              <img
+                src={renderedUrl}
+                alt="Render fotorrealista"
+                className="max-w-full max-h-[calc(100vh-120px)] rounded-xl shadow-2xl object-contain"
+              />
+              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur rounded-lg px-3 py-1.5 text-xs text-green-400 font-semibold">
+                ✓ Render completado
+              </div>
+            </div>
           ) : (
-            "✨ Generar Render"
+            <div className="relative">
+              <canvas ref={canvasRef} className="rounded-xl shadow-2xl" />
+              {!roomLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center text-gray-600">
+                    <div className="text-6xl mb-3">🏠</div>
+                    <p className="text-base font-medium">Sube una foto de la habitación vacía</p>
+                    <p className="text-sm mt-1 text-gray-700">Luego añade muebles desde el panel izquierdo</p>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
-        </button>
+        </main>
       </div>
 
-      {result && (
-        <div className="w-full max-w-2xl flex flex-col gap-4">
-          <h2 className="text-lg font-semibold">Resultado</h2>
-          <img src={result.imageUrl} alt="Render generado" className="w-full h-auto rounded-2xl border border-white/10" />
-          <details className="text-xs text-white/30">
-            <summary className="cursor-pointer hover:text-white/50">Ver prompt utilizado</summary>
-            <p className="mt-2 font-mono whitespace-pre-wrap">{result.promptUsed}</p>
-          </details>
-          <div className="flex gap-3">
-            <a href={result.imageUrl} target="_blank" rel="noopener noreferrer"
-              className="flex-1 py-2.5 rounded-xl text-sm font-medium text-center border border-white/20 hover:bg-white/5 transition">
-              Descargar imagen
-            </a>
-            <button onClick={() => { setStep("idle"); setResult(null); }}
-              className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-white/20 hover:bg-white/5 transition">
-              Nuevo render
-            </button>
+      {/* Processing overlay */}
+      {isProcessing && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 text-center max-w-xs shadow-2xl">
+            <div className="text-4xl mb-4 animate-pulse">✨</div>
+            <p className="text-white font-semibold text-base">{processingMsg}</p>
+            <p className="text-gray-400 text-sm mt-2">Por favor espera...</p>
           </div>
         </div>
       )}
-    </main>
-  );
-}
-
-function Label({ number, text }: { number: number; text: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-5 h-5 rounded-full bg-white/10 text-white/60 text-xs flex items-center justify-center font-bold">{number}</span>
-      <span className="text-sm font-medium text-white/80">{text}</span>
     </div>
-  );
-}
-
-function Spinner() {
-  return (
-    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-    </svg>
   );
 }
