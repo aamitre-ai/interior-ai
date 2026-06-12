@@ -25,6 +25,7 @@ export default function HomePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMsg, setProcessingMsg] = useState("");
   const [renderedUrl, setRenderedUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exportQuality, setExportQuality] = useState<"web" | "hd" | "print">("hd");
   const [roomName, setRoomName] = useState("Sala");
   const roomInputRef = useRef<HTMLInputElement>(null);
@@ -72,7 +73,7 @@ export default function HomePage() {
 
     return () => {
       mounted = false;
-      canvasObjRef.current?.dispose();
+      try { canvasObjRef.current?.dispose(); } catch (_) { /* ignore cleanup errors */ }
     };
   }, []);
 
@@ -161,7 +162,7 @@ export default function HomePage() {
         setRenderedUrl(null);
       });
     } catch (err: any) {
-      alert("Error: " + err.message);
+      setErrorMsg(err.message || "Error al procesar mueble");
     } finally {
       setIsProcessing(false);
       setProcessingMsg("");
@@ -248,6 +249,7 @@ export default function HomePage() {
   const getCompressedImage = (multiplier: number): string => {
     const canvas = canvasObjRef.current;
     const dataUrl = canvas.toDataURL({ format: "jpeg", quality: 0.92, multiplier });
+    // Compress to max ~3MB
     const sizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
     if (sizeKB > 2800) {
       return canvas.toDataURL({ format: "jpeg", quality: 0.75, multiplier: Math.max(1, multiplier - 0.5) });
@@ -292,7 +294,7 @@ export default function HomePage() {
         setProcessingMsg(`Generando... (${(i + 1) * 3}s)`);
       }
     } catch (err: any) {
-      alert("Error: " + err.message);
+      setErrorMsg(err.message || "Error al renderizar");
     } finally {
       setIsProcessing(false);
       setProcessingMsg("");
@@ -331,6 +333,13 @@ export default function HomePage() {
           />
         </div>
       </header>
+
+      {errorMsg && (
+        <div className="flex items-center justify-between px-4 py-2 bg-red-900/80 border-b border-red-700 text-red-200 text-sm flex-shrink-0">
+          <span>⚠ {errorMsg}</span>
+          <button onClick={() => setErrorMsg(null)} className="ml-4 text-red-300 hover:text-white font-bold">✕</button>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left Sidebar */}
@@ -537,15 +546,4 @@ export default function HomePage() {
       </div>
 
       {/* Processing overlay */}
-      {isProcessing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 text-center max-w-xs shadow-2xl">
-            <div className="text-4xl mb-4 animate-pulse">✨</div>
-            <p className="text-white font-semibold text-base">{processingMsg}</p>
-            <p className="text-gray-400 text-sm mt-2">Por favor espera...</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+      {isProcessing &&
