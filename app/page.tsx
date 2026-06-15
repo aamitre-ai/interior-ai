@@ -19,10 +19,11 @@ export default function HomePage() {
   const [roomLoaded, setRoomLoaded] = useState(false);
   const [furniture, setFurniture] = useState<FurnitureItem[]>([]);
   const [selected, setSelected] = useState<any>(null);
-  const [color, setColor] = useState("#FFFFFF");
+  const [color, setColor] = useState("#000000");
   const [colorAlpha, setColorAlpha] = useState(0);
   const [scaleVal, setScaleVal] = useState(100);
   const [rotateVal, setRotateVal] = useState(0);
+  const [rotateYVal, setRotateYVal] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMsg, setProcessingMsg] = useState("");
   const [renderedUrl, setRenderedUrl] = useState<string | null>(null);
@@ -32,12 +33,17 @@ export default function HomePage() {
   const roomInputRef = useRef<HTMLInputElement>(null);
   const furnitureInputRef = useRef<HTMLInputElement>(null);
 
+  // Size % derived from scaleY (unaffected by Y-axis rotation)
+  const getSizePct = (obj: any) => {
+    const base = obj.data?.baseScale || 1;
+    return Math.round(Math.abs((obj.scaleY || base) / base) * 100);
+  };
+
   // Init Fabric.js
   useEffect(() => {
     let mounted = true;
     import("fabric").then((mod) => {
       if (!mounted) return;
-      // Handle CJS default, ESM named export, and UMD interop
       const fabric = (mod as any).fabric
         ?? (mod as any).default?.fabric
         ?? (mod as any).default
@@ -54,16 +60,13 @@ export default function HomePage() {
       }
 
       try {
-        // Create canvas element imperatively so React never manages it directly.
-        // Fabric.js wraps it in .canvas-container, which would break React's
-        // removeChild reconciliation if React owned the <canvas> node.
         const el = document.createElement("canvas");
         canvasRef.current.appendChild(el);
 
         const canvas = new fabric.Canvas(el, {
           width: 880,
           height: 580,
-          backgroundColor: "#111118",
+          backgroundColor: "#F5F4F2",
           preserveObjectStacking: true,
         });
         canvasObjRef.current = canvas;
@@ -76,15 +79,32 @@ export default function HomePage() {
           const obj = e.selected?.[0];
           if (obj) updateSelectedState(obj);
         });
-        canvas.on("selection:cleared", () => {
-          setSelected(null);
-        });
+        canvas.on("selection:cleared", () => setSelected(null));
+
+        // During manual scaling: keep scaleX in sync with Y-rotation
         canvas.on("object:scaling", (e: any) => {
-          if (e.target) {
-            const s = Math.round(((e.target.scaleX || 1) / (e.target.data?.baseScale || 1)) * 100);
-            setScaleVal(s);
-          }
+          if (!e.target) return;
+          const obj = e.target;
+          const base = obj.data?.baseScale || 1;
+          const yAngle = obj.data?.yRotation || 0;
+          const cosVal = Math.cos((yAngle * Math.PI) / 180);
+          const sizePct = Math.abs(obj.scaleY / base);
+          obj.scaleX = cosVal * sizePct * base;
+          setScaleVal(Math.round(sizePct * 100));
         });
+
+        // After manual scale: persist sizePercent in data
+        canvas.on("object:scaled", (e: any) => {
+          if (!e.target) return;
+          const obj = e.target;
+          const base = obj.data?.baseScale || 1;
+          const yAngle = obj.data?.yRotation || 0;
+          const cosVal = Math.cos((yAngle * Math.PI) / 180);
+          const sizePct = Math.abs(obj.scaleY / base);
+          obj.set({ scaleX: cosVal * sizePct * base, data: { ...obj.data, sizePercent: sizePct } });
+          canvas.renderAll();
+        });
+
         canvas.on("object:rotating", (e: any) => {
           if (e.target) setRotateVal(Math.round(e.target.angle || 0));
         });
@@ -99,31 +119,27 @@ export default function HomePage() {
 
     return () => {
       mounted = false;
-      try { canvasObjRef.current?.dispose(); } catch (_) { /* ignore cleanup errors */ }
+      try { canvasObjRef.current?.dispose(); } catch (_) {}
     };
   }, []);
 
   const updateSelectedState = (obj: any) => {
     setSelected(obj);
-    setScaleVal(Math.round(((obj.scaleX || 1) / (obj.data?.baseScale || 1)) * 100));
+    setScaleVal(getSizePct(obj));
     setRotateVal(Math.round(obj.angle || 0));
+    setRotateYVal(obj.data?.yRotation || 0);
   };
 
-  // Upload room photo
   const handleRoomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !fabricRef.current || !canvasObjRef.current) return;
-
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       const fabric = fabricRef.current;
       const canvas = canvasObjRef.current;
-
       fabric.Image.fromURL(dataUrl, (img: any) => {
-        const scaleX = canvas.width / img.width;
-        const scaleY = canvas.height / img.height;
-        const scale = Math.min(scaleX, scaleY);
+        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
         img.set({ scaleX: scale, scaleY: scale, left: 0, top: 0, selectable: false, evented: false });
         canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
         setRoomLoaded(true);
@@ -133,26 +149,21 @@ export default function HomePage() {
     reader.readAsDataURL(file);
   };
 
-  // Upload furniture → remove bg → add to canvas
   const handleFurnitureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !fabricRef.current || !canvasObjRef.current) return;
     e.target.value = "";
-
     setIsProcessing(true);
     setProcessingMsg("Eliminando fondo...");
-
     try {
       const formData = new FormData();
       formData.append("image", file);
-
       const res = await fetch("/api/remove-bg", { method: "POST", body: formData });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || "Error al eliminar fondo");
       }
       const { image: noBgDataUrl } = await res.json();
-
       const fabric = fabricRef.current;
       const canvas = canvasObjRef.current;
       const id = `furniture_${Date.now()}`;
@@ -169,11 +180,11 @@ export default function HomePage() {
           top: canvas.height / 2 - (img.height * scale) / 2,
           scaleX: scale,
           scaleY: scale,
-          data: { id, baseScale: scale },
-          cornerColor: "#3b82f6",
-          cornerStrokeColor: "#1d4ed8",
-          borderColor: "#3b82f6",
-          cornerSize: 10,
+          data: { id, baseScale: scale, sizePercent: 1, yRotation: 0 },
+          cornerColor: "#000000",
+          cornerStrokeColor: "#000000",
+          borderColor: "#000000",
+          cornerSize: 8,
           transparentCorners: false,
         });
 
@@ -181,10 +192,14 @@ export default function HomePage() {
         canvas.setActiveObject(img);
         canvas.renderAll();
 
-        setFurniture((prev) => [...prev, { id, name: file.name.replace(/\.[^.]+$/, ""), thumbnail: noBgDataUrl, fabricObj: img }]);
+        setFurniture((prev) => [
+          ...prev,
+          { id, name: file.name.replace(/\.[^.]+$/, ""), thumbnail: noBgDataUrl, fabricObj: img },
+        ]);
         setSelected(img);
         setScaleVal(100);
         setRotateVal(0);
+        setRotateYVal(0);
         setRenderedUrl(null);
       });
     } catch (err: any) {
@@ -195,7 +210,6 @@ export default function HomePage() {
     }
   };
 
-  // Select a furniture item from the list
   const selectFurnitureItem = (item: FurnitureItem) => {
     const canvas = canvasObjRef.current;
     if (!canvas || !item.fabricObj) return;
@@ -204,7 +218,6 @@ export default function HomePage() {
     updateSelectedState(item.fabricObj);
   };
 
-  // Delete selected object
   const deleteSelected = () => {
     if (!selected || !canvasObjRef.current) return;
     const id = selected.data?.id;
@@ -215,7 +228,6 @@ export default function HomePage() {
     setRenderedUrl(null);
   };
 
-  // Apply color tint
   const applyColor = useCallback((hex: string, alpha: number) => {
     if (!selected || !fabricRef.current || !canvasObjRef.current) return;
     const fabric = fabricRef.current;
@@ -231,18 +243,24 @@ export default function HomePage() {
     setRenderedUrl(null);
   }, [selected]);
 
-  // Scale selected object
+  // Scale: scaleY = true size; scaleX = cosY * size (Y-rotation applied)
   const applyScale = (val: number) => {
     if (!selected || !canvasObjRef.current) return;
-    const baseScale = selected.data?.baseScale || 1;
-    const newScale = (val / 100) * baseScale;
-    selected.set({ scaleX: newScale, scaleY: newScale });
+    const base = selected.data?.baseScale || 1;
+    const yAngle = selected.data?.yRotation || 0;
+    const cosVal = Math.cos((yAngle * Math.PI) / 180);
+    const sizePct = val / 100;
+    selected.set({
+      scaleX: cosVal * sizePct * base,
+      scaleY: sizePct * base,
+      data: { ...selected.data, sizePercent: sizePct },
+    });
     canvasObjRef.current.renderAll();
     setScaleVal(val);
     setRenderedUrl(null);
   };
 
-  // Rotate selected object
+  // Z-axis rotation (tilt on canvas)
   const applyRotate = (val: number) => {
     if (!selected || !canvasObjRef.current) return;
     selected.set({ angle: val });
@@ -251,15 +269,29 @@ export default function HomePage() {
     setRenderedUrl(null);
   };
 
-  // Flip horizontal
-  const flipHorizontal = () => {
+  // Y-axis rotation: simulates turning furniture around its vertical axis
+  // cos(0°)=1 → front face; cos(180°)=-1 → back/mirrored; cos(90°/270°)=0 → edge on
+  const applyRotateY = (degrees: number) => {
     if (!selected || !canvasObjRef.current) return;
-    selected.set({ flipX: !selected.flipX });
+    const base = selected.data?.baseScale || 1;
+    const sizePct = selected.data?.sizePercent ?? (Math.abs(selected.scaleY) / base);
+    const cosVal = Math.cos((degrees * Math.PI) / 180);
+    selected.set({
+      scaleX: cosVal * sizePct * base,
+      data: { ...selected.data, yRotation: degrees },
+    });
     canvasObjRef.current.renderAll();
+    setRotateYVal(degrees);
     setRenderedUrl(null);
   };
 
-  // Send to back / bring to front
+  // Flip = add 180° to Y rotation (shows back/mirrored face)
+  const flipHorizontal = () => {
+    if (!selected) return;
+    const cur = selected.data?.yRotation || 0;
+    applyRotateY((cur + 180) % 360);
+  };
+
   const sendToBack = () => {
     if (!selected || !canvasObjRef.current) return;
     canvasObjRef.current.sendToBack(selected);
@@ -271,11 +303,9 @@ export default function HomePage() {
     canvasObjRef.current.renderAll();
   };
 
-  // Compress canvas image for API
   const getCompressedImage = (multiplier: number): string => {
     const canvas = canvasObjRef.current;
     const dataUrl = canvas.toDataURL({ format: "jpeg", quality: 0.92, multiplier });
-    // Compress to max ~3MB
     const sizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
     if (sizeKB > 2800) {
       return canvas.toDataURL({ format: "jpeg", quality: 0.75, multiplier: Math.max(1, multiplier - 0.5) });
@@ -283,20 +313,17 @@ export default function HomePage() {
     return dataUrl;
   };
 
-  // Render with AI
   const handleRender = async () => {
     if (!canvasObjRef.current || !roomLoaded) return;
     setIsProcessing(true);
     setRenderedUrl(null);
-
     try {
       setProcessingMsg("Exportando composición...");
       const imageBase64 = getCompressedImage(1.5);
-
       setProcessingMsg("Iniciando render IA...");
       const furnitureContext = furniture
-        .filter(f => f.direction)
-        .map(f => `${f.name}: ${f.direction}`)
+        .filter((f) => f.direction)
+        .map((f) => `${f.name}: ${f.direction}`)
         .join(", ");
       const res = await fetch("/api/render", {
         method: "POST",
@@ -308,24 +335,16 @@ export default function HomePage() {
         throw new Error(err.error || "Error al iniciar render");
       }
       const { predictionId, imageUrl: directImageUrl } = await res.json();
-
       if (directImageUrl) {
-        // Gemini returns the image directly (synchronous) — no polling needed
         setRenderedUrl(directImageUrl);
       } else {
-        // Fallback: Replicate-style async polling
         setProcessingMsg("Procesando con IA...");
         for (let i = 0; i < 60; i++) {
           await new Promise((r) => setTimeout(r, 3000));
           const statusRes = await fetch(`/api/status?id=${predictionId}`);
           const { status, imageUrl, error } = await statusRes.json();
-          if (status === "succeeded") {
-            setRenderedUrl(imageUrl);
-            break;
-          }
-          if (status === "failed" || status === "canceled") {
-            throw new Error(error || "El render falló");
-          }
+          if (status === "succeeded") { setRenderedUrl(imageUrl); break; }
+          if (status === "failed" || status === "canceled") throw new Error(error || "El render falló");
           setProcessingMsg(`Generando... (${(i + 1) * 3}s)`);
         }
       }
@@ -337,11 +356,9 @@ export default function HomePage() {
     }
   };
 
-  // Download
   const handleDownload = () => {
     const link = document.createElement("a");
     const multiplier = exportQuality === "print" ? 4 : exportQuality === "hd" ? 2 : 1;
-
     if (renderedUrl) {
       link.href = renderedUrl;
       link.download = `staging_${roomName.toLowerCase()}_render.jpg`;
@@ -352,87 +369,89 @@ export default function HomePage() {
     link.click();
   };
 
+  const yPresets = [
+    { deg: 0, label: "Frente" },
+    { deg: 90, label: "→" },
+    { deg: 180, label: "Espalda" },
+    { deg: 270, label: "←" },
+  ];
+
   return (
-    <div className="flex flex-col h-screen bg-gray-950 text-white overflow-hidden">
-      {/* Header */}
-      <header className="flex items-center justify-between px-5 py-3 bg-gray-900 border-b border-gray-800 flex-shrink-0">
+    <div className="flex flex-col h-screen bg-stone-100 text-stone-900 overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
+
+      {/* ── Header ── */}
+      <header className="flex items-center justify-between px-8 py-3 bg-white border-b border-stone-200 flex-shrink-0">
+        <span className="text-[11px] font-semibold tracking-[0.3em] uppercase text-stone-900">
+          Home Staging Studio
+        </span>
         <div className="flex items-center gap-3">
-          <span className="text-xl">🏠</span>
-          <h1 className="font-semibold text-white text-base">Home Staging AI</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">Estancia:</span>
+          <span className="text-[9px] tracking-[0.25em] uppercase text-stone-400">Estancia</span>
           <input
             value={roomName}
             onChange={(e) => setRoomName(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white w-28"
+            className="border-b border-stone-300 focus:border-stone-900 bg-transparent text-[11px] text-stone-900 px-0 py-0.5 w-20 outline-none transition-colors tracking-wide"
           />
         </div>
       </header>
 
       {errorMsg && (
-        <div className="flex items-center justify-between px-4 py-2 bg-red-900/80 border-b border-red-700 text-red-200 text-sm flex-shrink-0">
-          <span>⚠ {errorMsg}</span>
-          <button onClick={() => setErrorMsg(null)} className="ml-4 text-red-300 hover:text-white font-bold">✕</button>
+        <div className="flex items-center justify-between px-6 py-2 bg-stone-900 text-white text-[11px] flex-shrink-0">
+          <span>{errorMsg}</span>
+          <button onClick={() => setErrorMsg(null)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">✕</button>
         </div>
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar */}
-        <aside className="w-60 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto flex-shrink-0">
-          <div className="p-3 space-y-4">
+
+        {/* ── Left Sidebar ── */}
+        <aside className="w-64 bg-white border-r border-stone-200 flex flex-col overflow-y-auto flex-shrink-0">
+          <div className="p-5 space-y-7">
 
             {/* Room photo */}
             <section>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Foto de la habitación</p>
+              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Habitación</p>
               <button
                 onClick={() => roomInputRef.current?.click()}
-                className={`w-full border-2 border-dashed rounded-lg p-3 text-center transition-colors ${
-                  roomLoaded ? "border-green-600 bg-green-900/20" : "border-gray-600 hover:border-blue-500"
+                className={`w-full border py-4 text-center transition-all text-[10px] tracking-[0.2em] uppercase ${
+                  roomLoaded
+                    ? "border-stone-900 text-stone-900"
+                    : "border-stone-200 text-stone-400 hover:border-stone-400 hover:text-stone-600"
                 }`}
               >
-                {roomLoaded ? (
-                  <div className="text-green-400 text-sm">✓ Foto cargada<br /><span className="text-gray-400 text-xs">Clic para cambiar</span></div>
-                ) : (
-                  <div className="text-gray-400 text-sm">
-                    <div className="text-2xl mb-1">📷</div>
-                    <div>Subir foto vacía</div>
-                  </div>
-                )}
+                {roomLoaded ? "✓  Foto cargada" : "Subir foto"}
               </button>
               <input ref={roomInputRef} type="file" accept="image/*" className="hidden" onChange={handleRoomUpload} />
             </section>
 
             {/* Furniture */}
             <section>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Muebles y adornos</p>
+              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Muebles</p>
               <button
                 onClick={() => furnitureInputRef.current?.click()}
                 disabled={!isReady}
-                className="w-full border-2 border-dashed border-gray-600 rounded-lg p-2 text-center hover:border-green-500 transition-colors disabled:opacity-50"
+                className="w-full border border-stone-200 py-3 text-center text-[10px] tracking-[0.2em] uppercase text-stone-400 hover:border-stone-400 hover:text-stone-600 transition-all disabled:opacity-30"
               >
-                <div className="text-gray-400 text-sm">
-                  <span className="text-lg">🪑</span>
-                  <div className="text-xs mt-1">+ Añadir mueble</div>
-                </div>
+                + Añadir mueble
               </button>
               <input ref={furnitureInputRef} type="file" accept="image/*" className="hidden" onChange={handleFurnitureUpload} />
 
               {furniture.length > 0 && (
-                <div className="mt-2 space-y-1">
+                <div className="mt-3 space-y-px">
                   {furniture.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => selectFurnitureItem(item)}
-                      className={`w-full flex items-center gap-2 rounded-lg p-2 transition-colors text-left ${
-                        selected?.data?.id === item.id ? "bg-blue-900/50 border border-blue-600" : "bg-gray-800 hover:bg-gray-700"
+                      className={`w-full flex items-center gap-3 p-2.5 text-left border transition-all ${
+                        selected?.data?.id === item.id
+                          ? "border-stone-900 bg-stone-50"
+                          : "border-transparent hover:border-stone-200"
                       }`}
                     >
-                      <img src={item.thumbnail} alt={item.name} className="w-8 h-8 object-contain flex-shrink-0" />
+                      <img src={item.thumbnail} alt={item.name} className="w-9 h-9 object-contain flex-shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <span className="text-xs text-gray-300 truncate block">{item.name}</span>
+                        <span className="text-[11px] text-stone-700 truncate block">{item.name}</span>
                         {item.direction && (
-                          <span className="text-xs text-blue-400 truncate block">↳ {item.direction}</span>
+                          <span className="text-[9px] text-stone-400 truncate block">↳ {item.direction}</span>
                         )}
                       </div>
                     </button>
@@ -441,178 +460,133 @@ export default function HomePage() {
               )}
             </section>
 
-            {/* Controls for selected item */}
+            {/* Controls */}
             {selected && (
-              <section className="border-t border-gray-700 pt-3 space-y-3">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Ajustes</p>
+              <section className="border-t border-stone-100 pt-6 space-y-5">
+                <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400">Ajustes del mueble</p>
 
                 {/* Scale */}
                 <div>
-                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                  <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
                     <span>Tamaño</span><span>{scaleVal}%</span>
                   </div>
                   <input
                     type="range" min={20} max={300} value={scaleVal}
                     onChange={(e) => applyScale(Number(e.target.value))}
-                    className="w-full accent-blue-500"
+                    className="w-full accent-stone-900" style={{ height: "1px" }}
                   />
                 </div>
 
-                {/* Rotate */}
+                {/* Z-Rotation (tilt) */}
                 <div>
-                  <div className="flex justify-between text-xs text-gray-400 mb-1">
-                    <span>Rotación</span><span>{rotateVal}°</span>
+                  <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
+                    <span>Inclinación</span><span>{rotateVal}°</span>
                   </div>
                   <input
                     type="range" min={-180} max={180} value={rotateVal}
                     onChange={(e) => applyRotate(Number(e.target.value))}
-                    className="w-full accent-blue-500"
+                    className="w-full accent-stone-900" style={{ height: "1px" }}
                   />
                 </div>
 
-                {/* Color */}
+                {/* Y-Rotation (spin around own axis) */}
                 <div>
-                  <div className="flex justify-between text-xs text-gray-400 mb-1">
-                    <span>Color / Tinte</span><span>{colorAlpha}%</span>
+                  <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
+                    <span>Giro propio</span>
+                    <span>{Math.round(rotateYVal)}°</span>
+                  </div>
+                  <input
+                    type="range" min={0} max={360} value={rotateYVal}
+                    onChange={(e) => applyRotateY(Number(e.target.value))}
+                    className="w-full accent-stone-900" style={{ height: "1px" }}
+                  />
+                  {/* Quick presets */}
+                  <div className="grid grid-cols-4 gap-1 mt-2">
+                    {yPresets.map(({ deg, label }) => {
+                      const diff = Math.abs(rotateYVal - deg);
+                      const active = diff < 5 || (deg === 0 && rotateYVal > 355);
+                      return (
+                        <button
+                          key={deg}
+                          onClick={() => applyRotateY(deg)}
+                          className={`text-[9px] py-1.5 border tracking-wider transition-all ${
+                            active
+                              ? "border-stone-900 bg-stone-900 text-white"
+                              : "border-stone-200 text-stone-500 hover:border-stone-400"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Color tint */}
+                <div>
+                  <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
+                    <span>Tinte</span><span>{colorAlpha}%</span>
                   </div>
                   <div className="flex gap-2 items-center">
                     <input
                       type="color" value={color}
                       onChange={(e) => { setColor(e.target.value); if (colorAlpha > 0) applyColor(e.target.value, colorAlpha); }}
-                      className="h-8 w-10 rounded cursor-pointer border-0 bg-transparent"
+                      className="h-6 w-9 cursor-pointer border border-stone-200 bg-transparent p-0.5"
                     />
                     <input
                       type="range" min={0} max={80} value={colorAlpha}
                       onChange={(e) => { const v = Number(e.target.value); setColorAlpha(v); applyColor(color, v); }}
-                      className="flex-1 accent-blue-500"
+                      className="flex-1 accent-stone-900" style={{ height: "1px" }}
                     />
                     {colorAlpha > 0 && (
-                      <button
-                        onClick={() => { setColorAlpha(0); applyColor(color, 0); }}
-                        className="text-xs text-gray-400 hover:text-white"
-                        title="Quitar color"
-                      >✕</button>
+                      <button onClick={() => { setColorAlpha(0); applyColor(color, 0); }} className="text-[9px] text-stone-400 hover:text-stone-900 transition-colors">✕</button>
                     )}
                   </div>
                 </div>
 
-                {/* Direction / note */}
+                {/* Direction note */}
                 <div>
-                  <div className="text-xs text-gray-400 mb-1">Dirección / nota</div>
+                  <div className="text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">Dirección / nota</div>
                   <input
                     type="text"
                     placeholder="ej. mira hacia la TV"
-                    value={furniture.find(f => f.fabricObj === selected)?.direction ?? ""}
+                    value={furniture.find((f) => f.fabricObj === selected)?.direction ?? ""}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setFurniture(prev => prev.map(f =>
-                        f.fabricObj === selected ? { ...f, direction: val } : f
-                      ));
+                      setFurniture((prev) =>
+                        prev.map((f) => (f.fabricObj === selected ? { ...f, direction: val } : f))
+                      );
                     }}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white placeholder-gray-600"
+                    className="w-full border-b border-stone-200 focus:border-stone-900 bg-transparent text-[11px] text-stone-900 py-1 outline-none transition-colors placeholder-stone-300"
                   />
                 </div>
 
                 {/* Quick actions */}
-                <div className="flex flex-wrap gap-1">
-                  <button onClick={flipHorizontal} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">↔ Voltear</button>
-                  <button onClick={sendToBack} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">⬇ Al fondo</button>
-                  <button onClick={bringToFront} className="text-xs bg-gray-800 hover:bg-gray-700 px-2 py-1 rounded">⬆ Al frente</button>
+                <div className="grid grid-cols-3 gap-1">
+                  <button onClick={flipHorizontal} className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Voltear</button>
+                  <button onClick={sendToBack}    className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Al fondo</button>
+                  <button onClick={bringToFront}  className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Frente</button>
                 </div>
 
                 {/* Delete */}
                 <button
                   onClick={deleteSelected}
-                  className="w-full py-1.5 bg-red-900/50 hover:bg-red-800/70 text-red-300 rounded text-xs transition-colors"
+                  className="w-full py-2 border border-stone-200 hover:border-stone-900 hover:bg-stone-900 hover:text-white text-stone-400 text-[9px] tracking-[0.25em] uppercase transition-all"
                 >
-                  🗑 Eliminar elemento
+                  Eliminar
                 </button>
               </section>
             )}
           </div>
 
           {/* Bottom actions */}
-          <div className="mt-auto p-3 space-y-2 border-t border-gray-800">
+          <div className="mt-auto p-5 space-y-3 border-t border-stone-100">
             <div>
-              <p className="text-xs text-gray-400 mb-1">Calidad de exportación</p>
+              <p className="text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">Exportar</p>
               <select
                 value={exportQuality}
                 onChange={(e) => setExportQuality(e.target.value as any)}
-                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white"
+                className="w-full border border-stone-200 bg-white text-[11px] text-stone-700 py-2 px-2 focus:border-stone-900 outline-none transition-colors"
               >
-                <option value="web">Web (1x)</option>
-                <option value="hd">HD (2x)</option>
-                <option value="print">Impresión (4x)</option>
-              </select>
-            </div>
-
-            <button
-              onClick={handleRender}
-              disabled={!roomLoaded || isProcessing}
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg font-semibold text-sm transition-colors"
-            >
-              {isProcessing ? "⏳ " + processingMsg : "✨ Renderizar"}
-            </button>
-
-            <button
-              onClick={handleDownload}
-              disabled={!roomLoaded && !renderedUrl}
-              className="w-full py-2 bg-green-700 hover:bg-green-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg text-sm transition-colors"
-            >
-              ⬇ Descargar imagen
-            </button>
-
-            {renderedUrl && (
-              <button
-                onClick={() => setRenderedUrl(null)}
-                className="w-full py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs transition-colors"
-              >
-                ← Volver al editor
-              </button>
-            )}
-          </div>
-        </aside>
-
-        {/* Canvas area */}
-        <main className="flex-1 flex items-center justify-center bg-gray-950 overflow-hidden p-4">
-          {renderedUrl ? (
-            <div className="relative max-w-full max-h-full">
-              <img
-                src={renderedUrl}
-                alt="Render fotorrealista"
-                className="max-w-full max-h-[calc(100vh-120px)] rounded-xl shadow-2xl object-contain"
-              />
-              <div className="absolute top-3 left-3 bg-black/60 backdrop-blur rounded-lg px-3 py-1.5 text-xs text-green-400 font-semibold">
-                ✓ Render completado
-              </div>
-            </div>
-          ) : (
-            <div className="relative">
-              <div ref={canvasRef} className="rounded-xl shadow-2xl overflow-hidden" />
-              {!roomLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-center text-gray-600">
-                    <div className="text-6xl mb-3">🏠</div>
-                    <p className="text-base font-medium">Sube una foto de la habitación vacía</p>
-                    <p className="text-sm mt-1 text-gray-700">Luego añade muebles desde el panel izquierdo</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </main>
-      </div>
-
-      {/* Processing overlay */}
-      {isProcessing && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-8 text-center max-w-xs shadow-2xl">
-            <div className="text-4xl mb-4 animate-pulse">✨</div>
-            <p className="text-white font-semibold text-base">{processingMsg}</p>
-            <p className="text-gray-400 text-sm mt-2">Por favor espera...</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+                <option value="web">Web  (1×)</option>
+                <option value="
