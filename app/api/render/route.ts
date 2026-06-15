@@ -14,20 +14,6 @@ const STYLE_PROMPTS = {
   contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated décor",
 };
 
-export async function GET(req: NextRequest) {
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "no key" }, { status: 500 });
-  const { searchParams } = new URL(req.url);
-  const ver = searchParams.get("v") || "v1beta";
-  const url = `https://generativelanguage.googleapis.com/${ver}/models?key=${apiKey}&pageSize=100`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const imageModels = (data.models || []).filter((m) =>
-    m.name.includes("image") || m.name.includes("flash") || m.name.includes("imagen")
-  );
-  return NextResponse.json({ ver, count: (data.models||[]).length, imageModels: imageModels.map(m => ({ name: m.name, methods: m.supportedGenerationMethods })) });
-}
-
 export async function POST(req: NextRequest) {
   try {
     const {
@@ -38,8 +24,6 @@ export async function POST(req: NextRequest) {
       initialPrompt,
       refinementPrompt,
       isRefinement,
-      _model,
-      _apiVersion,
     } = await req.json();
 
     const apiKey = process.env.GOOGLE_AI_API_KEY;
@@ -94,9 +78,8 @@ Output: A single photo-realistic interior design rendering of the transformed ro
     if (referencePhotoBase64 && !isRefinement) parts.push(toInlinePart(referencePhotoBase64));
     parts.push({ text: prompt });
 
-    const model = _model || "gemini-2.0-flash-preview-image-generation";
-    const apiVersion = _apiVersion || "v1beta";
-    const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`;
+    const model = "gemini-2.5-flash-image";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const res = await fetch(url, {
       method: "POST",
@@ -111,6 +94,7 @@ Output: A single photo-realistic interior design rendering of the transformed ro
 
     if (!res.ok) {
       const errMsg = data?.error?.message || JSON.stringify(data?.error) || "Gemini API error";
+      console.error("Gemini API error:", data?.error);
       return NextResponse.json({ error: errMsg }, { status: 500 });
     }
 
