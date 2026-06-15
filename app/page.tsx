@@ -821,4 +821,14 @@ export default function HomePage() {
       {isProcessing && (
         <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white border border-stone-200 p-10 text-center max-w-xs shadow-sm">
-            <
+             <div className="w-6 h-6 border border-stone-300 border-t-stone-900 rounded-full animate-spin mx-auto mb-4" />
+             <p className="text-[10px] font-semibold tracking-[0.25em] uppercase text-stone-900 mb-2">
+               Renderizando
+             </p>
+             <p className="text-[9px] text-stone-400 tracking-wider">{processingMsg}</p>
+           </div>
+         </div>
+       )}
+     </div>
+  );
+}
