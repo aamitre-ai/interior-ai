@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 
 const STYLE_PROMPTS = {
@@ -15,7 +14,7 @@ const STYLE_PROMPTS = {
   contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated décor",
 };
 
-export async function POST(req) {
+export async function POST(req: NextRequest) {
   try {
     const {
       imageBase64,
@@ -32,79 +31,94 @@ export async function POST(req) {
       return NextResponse.json({ error: "GOOGLE_AI_API_KEY no configurada" }, { status: 500 });
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const styleDesc = STYLE_PROMPTS[selectedStyle] || "Modern contemporary interior design";
 
-    const toImagePart = (dataUrl) => {
+    let prompt: string;
+    if (isRefinement && refinementPrompt) {
+      prompt = `You are an expert interior designer and photo-realistic renderer.
+You previously rendered an interior design. Now the client wants adjustments.
+
+Refinement request: "${refinementPrompt}"
+
+Apply these changes while maintaining the overall composition, lighting, and quality.
+Produce a photo-realistic interior design rendering that incorporates the requested changes.`;
+    } else {
+      const furnitureSection = furnitureContext
+        ? `\nExisting furniture and items detected in the room:\n${furnitureContext}\nIncorporate or complement these existing elements in your design.`
+        : "";
+
+      const userPromptSection = initialPrompt
+        ? `\nAdditional client description: "${initialPrompt}"`
+        : "";
+
+      const refPhotoSection = referencePhotoBase64
+        ? "\nA reference style photo has been provided as the second image. Use it as inspiration for the aesthetic, color palette, and mood."
+        : "";
+
+      prompt = `You are an expert interior designer and photo-realistic renderer.
+Transform this room photo into a stunning ${styleDesc} interior design rendering.${furnitureSection}${userPromptSection}${refPhotoSection}
+
+Requirements:
+- Create a photo-realistic render, not a drawing or illustration
+- Maintain the room's original architecture, dimensions, and window/door positions
+- Apply the specified style consistently throughout: furniture, colors, textures, lighting
+- Ensure proper lighting with realistic shadows and reflections
+- Add appropriate décor, plants, and accessories that complement the style
+- The result should look like a professional architectural visualization
+
+Output: A single photo-realistic interior design rendering of the transformed room.`;
+    }
+
+    const toInlinePart = (dataUrl: string) => {
       const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
       if (!match) throw new Error("Invalid image format");
       return { inlineData: { mimeType: match[1], data: match[2] } };
     };
 
-    let prompt;
-
-    if (isRefinement && refinementPrompt) {
-      const styleNote = selectedStyle && STYLE_PROMPTS[selectedStyle]
-        ? ` Maintain the ${STYLE_PROMPTS[selectedStyle]} aesthetic.`
-        : "";
-      prompt = `You are a professional interior design rendering AI. You have been given an existing photorealistic room render.
-
-Please refine and improve this render based on the following instruction from the user:
-"${refinementPrompt}"
-
-Maintain the overall room layout and furniture arrangement. Only apply the specific changes requested.${styleNote}
-
-Output: A single photorealistic interior design image in the same dimensions and perspective as the input. Output the image only, no text.`;
-    } else {
-      const styleNote = selectedStyle && STYLE_PROMPTS[selectedStyle]
-        ? `\n\nApply the following decoration style: ${STYLE_PROMPTS[selectedStyle]}.`
-        : "";
-      const furnitureNote = furnitureContext
-        ? `\n\nFurniture context notes:\n${furnitureContext}`
-        : "";
-      const referenceNote = referencePhotoBase64
-        ? "\n\nA reference/inspiration image has been provided as the second image. Replicate its style, color palette, lighting mood, and material choices in the rendered output."
-        : "";
-      const initialNote = initialPrompt
-        ? `\n\nAdditional instructions from the user: "${initialPrompt}". Incorporate these directions into the render.`
-        : "";
-
-      prompt = `You are a professional interior design AI specializing in photorealistic home staging renders.
-
-The first image shows a room with furniture items placed by the user. Transform this into a stunning photorealistic interior design render.
-
-Requirements:
-- Keep all furniture items in their exact positions as shown
-- Make every surface, material, and texture photorealistic
-- Add realistic lighting, shadows, and reflections
-- Enhance walls, floors, and ceiling with realistic finishes
-- Add appropriate ambient objects (plants, artwork, cushions, rugs, lamps) to complete the staging
-- The result should look like a professional real estate or interior design photography${styleNote}${furnitureNote}${referenceNote}${initialNote}
-
-Output: A single photorealistic interior design image at the same dimensions and perspective as the input. Output the image only, no text or commentary.`;
-    }
-
-    const parts = [];
-    if (imageBase64) parts.push(toImagePart(imageBase64));
-    if (referencePhotoBase64 && !isRefinement) parts.push(toImagePart(referencePhotoBase64));
+    const parts: any[] = [];
+    if (imageBase64) parts.push(toInlinePart(imageBase64));
+    if (referencePhotoBase64 && !isRefinement) parts.push(toInlinePart(referencePhotoBase64));
     parts.push({ text: prompt });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash-preview-image-generation",
-      contents: [{ role: "user", parts }],
-      config: { responseModalities: ["IMAGE", "TEXT"] },
+    // Use v1alpha — gemini-2.0-flash-preview-image-generation is only available there
+    const model = "gemini-2.0-flash-preview-image-generation";
+    const url = `https://generativelanguage.googleapis.com/v1alpha/models/${model}:generateContent?key=${apiKey}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: {
+          responseModalities: ["IMAGE", "TEXT"],
+        },
+      }),
     });
 
-    for (const candidate of (response.candidates || [])) {
-      for (const part of (candidate.content?.parts || [])) {
+    const data = await res.json();
+
+    if (!res.ok) {
+      const errMsg = data?.error?.message || JSON.stringify(data?.error) || "Gemini API error";
+      console.error("Gemini API error:", data?.error);
+      return NextResponse.json({ error: errMsg }, { status: 500 });
+    }
+
+    for (const candidate of data.candidates || []) {
+      for (const part of candidate.content?.parts || []) {
         if (part.inlineData?.data) {
           const mimeType = part.inlineData.mimeType || "image/png";
-          return NextResponse.json({ imageUrl: `data:${mimeType};base64,${part.inlineData.data}` });
+          return NextResponse.json({
+            imageUrl: `data:${mimeType};base64,${part.inlineData.data}`,
+          });
         }
       }
     }
 
-    return NextResponse.json({ error: "Gemini no devolvio imagen. Intenta de nuevo." }, { status: 500 });
-  } catch (err) {
+    return NextResponse.json(
+      { error: "Gemini no devolvio imagen. Intenta de nuevo." },
+      { status: 500 }
+    );
+  } catch (err: any) {
     console.error("Render error:", err);
     return NextResponse.json(
       { error: err?.message || "Error interno al renderizar" },
