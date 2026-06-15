@@ -1,56 +1,81 @@
-import Replicate from "replicate";
 import { NextRequest, NextResponse } from "next/server";
-
-const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-export const maxDuration = 30;
-
-// SDXL img2img version
-const SDXL_VERSION = "7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc";
 
 export async function POST(req: NextRequest) {
   try {
     const { imageBase64, furnitureContext } = await req.json();
 
-    if (!imageBase64) {
-      return NextResponse.json({ error: "No se recibió imagen" }, { status: 400 });
+    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "GOOGLE_AI_API_KEY no está configurada en las variables de entorno" },
+        { status: 500 }
+      );
     }
 
-    if (!process.env.REPLICATE_API_TOKEN) {
-      return NextResponse.json({ error: "REPLICATE_API_TOKEN no está configurado en Vercel" }, { status: 500 });
-    }
-
-    // Normalize to JPEG data URI
+    // Strip data URL prefix if present
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-    const imageUri = `data:image/jpeg;base64,${base64Data}`;
 
-    const basePrompt =
-      "photorealistic interior design photograph, professional real estate photography, " +
-      "realistic lighting, natural shadows, high quality, 8k resolution, ultra detailed, " +
-      "architectural photography, interior design magazine";
-    const prompt = furnitureContext
-      ? `${basePrompt}, ${furnitureContext}`
-      : basePrompt;
+    let prompt =
+      "This is a home staging composite: a real room photo with furniture images placed on top digitally. " +
+      "Transform this into a single, photorealistic professional interior design photograph. " +
+      "Integrate all furniture naturally into the scene: match the room's ambient lighting and color temperature, " +
+      "add realistic contact shadows and soft reflections on the floor, blend material textures with the environment, " +
+      "and make perspective and scale feel correct. " +
+      "The final image should look indistinguishable from a real photo taken by a professional architectural photographer. " +
+      "Preserve the room's architecture (walls, windows, floor, ceiling) exactly as they appear.";
 
-    const prediction = await replicate.predictions.create({
-      version: SDXL_VERSION,
-      input: {
-        image: imageUri,
-        prompt,
-        negative_prompt:
-          "cartoon, illustration, painting, drawing, blurry, low quality, watermark, " +
-          "text, extra objects, different furniture, distorted, unrealistic",
-        prompt_strength: 0.22,
-        guidance_scale: 7,
-        num_inference_steps: 30,
-        scheduler: "K_EULER",
-        apply_watermark: false,
-      },
-    });
+    if (furnitureContext) {
+      prompt += ` Important placement notes for the furniture: ${furnitureContext}.`;
+    }
 
-    return NextResponse.json({ predictionId: prediction.id });
-  } catch (error: any) {
-    const message = error?.message || error?.detail || String(error);
-    console.error("[render] Error:", message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-image:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: "image/jpeg",
+                    data: base64Data,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      const errMsg =
+        (errBody as any)?.error?.message || `Gemini API error ${response.status}`;
+      return NextResponse.json({ error: errMsg }, { status: 500 });
+    }
+
+    const result = await response.json();
+    const parts: any[] = result?.candidates?.[0]?.content?.parts ?? [];
+    const imagePart = parts.find((p) => p.inlineData);
+
+    if (!imagePart) {
+      const textPart = parts.find((p) => p.text);
+      const msg = textPart?.text || "Gemini no devolvió una imagen";
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+
+    const mimeType: string = imagePart.inlineData.mimeType ?? "image/png";
+    const imageUrl = `data:${mimeType};base64,${imagePart.inlineData.data}`;
+
+    return NextResponse.json({ imageUrl });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message || "Error interno del servidor" },
+      { status: 500 }
+    );
   }
 }
