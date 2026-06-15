@@ -14,6 +14,20 @@ const STYLE_PROMPTS = {
   contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated décor",
 };
 
+export async function GET(req: NextRequest) {
+  const apiKey = process.env.GOOGLE_AI_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: "no key" }, { status: 500 });
+  const { searchParams } = new URL(req.url);
+  const ver = searchParams.get("v") || "v1beta";
+  const url = `https://generativelanguage.googleapis.com/${ver}/models?key=${apiKey}&pageSize=100`;
+  const res = await fetch(url);
+  const data = await res.json();
+  const imageModels = (data.models || []).filter((m) =>
+    m.name.includes("image") || m.name.includes("flash") || m.name.includes("imagen")
+  );
+  return NextResponse.json({ ver, count: (data.models||[]).length, imageModels: imageModels.map(m => ({ name: m.name, methods: m.supportedGenerationMethods })) });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const {
@@ -24,6 +38,8 @@ export async function POST(req: NextRequest) {
       initialPrompt,
       refinementPrompt,
       isRefinement,
+      _model,
+      _apiVersion,
     } = await req.json();
 
     const apiKey = process.env.GOOGLE_AI_API_KEY;
@@ -46,11 +62,9 @@ Produce a photo-realistic interior design rendering that incorporates the reques
       const furnitureSection = furnitureContext
         ? `\nExisting furniture and items detected in the room:\n${furnitureContext}\nIncorporate or complement these existing elements in your design.`
         : "";
-
       const userPromptSection = initialPrompt
         ? `\nAdditional client description: "${initialPrompt}"`
         : "";
-
       const refPhotoSection = referencePhotoBase64
         ? "\nA reference style photo has been provided as the second image. Use it as inspiration for the aesthetic, color palette, and mood."
         : "";
@@ -80,18 +94,16 @@ Output: A single photo-realistic interior design rendering of the transformed ro
     if (referencePhotoBase64 && !isRefinement) parts.push(toInlinePart(referencePhotoBase64));
     parts.push({ text: prompt });
 
-    // Use v1alpha — gemini-2.0-flash-preview-image-generation is only available there
-    const model = "gemini-2.0-flash-preview-image-generation";
-    const url = `https://generativelanguage.googleapis.com/v1alpha/models/${model}:generateContent?key=${apiKey}`;
+    const model = _model || "gemini-2.0-flash-preview-image-generation";
+    const apiVersion = _apiVersion || "v1beta";
+    const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${apiKey}`;
 
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts }],
-        generationConfig: {
-          responseModalities: ["IMAGE", "TEXT"],
-        },
+        generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
       }),
     });
 
@@ -99,7 +111,6 @@ Output: A single photo-realistic interior design rendering of the transformed ro
 
     if (!res.ok) {
       const errMsg = data?.error?.message || JSON.stringify(data?.error) || "Gemini API error";
-      console.error("Gemini API error:", data?.error);
       return NextResponse.json({ error: errMsg }, { status: 500 });
     }
 
@@ -107,22 +118,14 @@ Output: A single photo-realistic interior design rendering of the transformed ro
       for (const part of candidate.content?.parts || []) {
         if (part.inlineData?.data) {
           const mimeType = part.inlineData.mimeType || "image/png";
-          return NextResponse.json({
-            imageUrl: `data:${mimeType};base64,${part.inlineData.data}`,
-          });
+          return NextResponse.json({ imageUrl: `data:${mimeType};base64,${part.inlineData.data}` });
         }
       }
     }
 
-    return NextResponse.json(
-      { error: "Gemini no devolvio imagen. Intenta de nuevo." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Gemini no devolvio imagen. Intenta de nuevo." }, { status: 500 });
   } catch (err: any) {
     console.error("Render error:", err);
-    return NextResponse.json(
-      { error: err?.message || "Error interno al renderizar" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err?.message || "Error interno al renderizar" }, { status: 500 });
   }
 }
