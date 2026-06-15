@@ -11,6 +11,19 @@ interface FurnitureItem {
   direction?: string;
 }
 
+const STYLES = [
+  { id: "nordico", label: "Nórdico", desc: "Madera clara, blanco, minimalismo" },
+  { id: "industrial", label: "Industrial", desc: "Metal, madera oscura, ladrillo visto" },
+  { id: "minimalista", label: "Minimalista", desc: "Líneas limpias, paleta neutra" },
+  { id: "mediterraneo", label: "Mediterráneo", desc: "Terracota, lino, calidez natural" },
+  { id: "japandi", label: "Japandi", desc: "Japonés + escandinavo, wabi-sabi" },
+  { id: "bohemio", label: "Bohemio", desc: "Ecléctico, plantas, textiles, color" },
+  { id: "art_deco", label: "Art Déco", desc: "Geométrico, lujoso, detalles dorados" },
+  { id: "rustico", label: "Rústico", desc: "Madera, piedra, materiales naturales" },
+  { id: "clasico", label: "Clásico", desc: "Elegante, formal, tonos cálidos" },
+  { id: "contemporaneo", label: "Contemporáneo", desc: "Tendencias actuales, neutro + acento" },
+];
+
 export default function HomePage() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<any>(null);
@@ -22,15 +35,26 @@ export default function HomePage() {
   const [color, setColor] = useState("#000000");
   const [colorAlpha, setColorAlpha] = useState(0);
   const [scaleVal, setScaleVal] = useState(100);
-  const [rotateVal, setRotateVal] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMsg, setProcessingMsg] = useState("");
   const [renderedUrl, setRenderedUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exportQuality, setExportQuality] = useState<"web" | "hd" | "print">("hd");
   const [roomName, setRoomName] = useState("Sala");
+
+  // Style selection
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
+  const [showStylePanel, setShowStylePanel] = useState(false);
+
+  // Reference / inspiration photo
+  const [referencePhotoBase64, setReferencePhotoBase64] = useState<string | null>(null);
+
+  // Refinement prompt (post-render)
+  const [refinementPrompt, setRefinementPrompt] = useState("");
+
   const roomInputRef = useRef<HTMLInputElement>(null);
   const furnitureInputRef = useRef<HTMLInputElement>(null);
+  const referenceInputRef = useRef<HTMLInputElement>(null);
 
   const getSizePct = (obj: any) => {
     const base = obj.data?.baseScale || 1;
@@ -96,10 +120,6 @@ export default function HomePage() {
           canvas.renderAll();
         });
 
-        canvas.on("object:rotating", (e: any) => {
-          if (e.target) setRotateVal(Math.round(e.target.angle || 0));
-        });
-
         setIsReady(true);
       } catch (err: any) {
         setErrorMsg("Error al inicializar canvas: " + (err?.message || String(err)));
@@ -117,7 +137,6 @@ export default function HomePage() {
   const updateSelectedState = (obj: any) => {
     setSelected(obj);
     setScaleVal(getSizePct(obj));
-    setRotateVal(Math.round(obj.angle || 0));
   };
 
   const loadImageAsBackground = (dataUrl: string) => {
@@ -142,13 +161,34 @@ export default function HomePage() {
       setRenderedUrl(null);
     };
     reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
-  // Use the rendered image as the new room base for iterative editing
+  // Use rendered image as new room base — clears furniture (it's baked into render)
   const handleUseAsBase = () => {
     if (!renderedUrl) return;
+    const canvas = canvasObjRef.current;
+    // Remove all furniture objects from canvas
+    furniture.forEach((item) => {
+      if (item.fabricObj && canvas) canvas.remove(item.fabricObj);
+    });
+    canvas?.renderAll();
+    setFurniture([]);
+    setSelected(null);
     loadImageAsBackground(renderedUrl);
     setRenderedUrl(null);
+    setRefinementPrompt("");
+  };
+
+  const handleReferencePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setReferencePhotoBase64(ev.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   const handleFurnitureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -200,7 +240,6 @@ export default function HomePage() {
         ]);
         setSelected(img);
         setScaleVal(100);
-        setRotateVal(0);
         setRenderedUrl(null);
       });
     } catch (err: any) {
@@ -258,11 +297,16 @@ export default function HomePage() {
     setRenderedUrl(null);
   };
 
-  const applyRotate = (val: number) => {
-    if (!selected || !canvasObjRef.current) return;
-    selected.set({ angle: val });
-    canvasObjRef.current.renderAll();
-    setRotateVal(val);
+  const deleteFurnitureById = (id: string) => {
+    const canvas = canvasObjRef.current;
+    if (!canvas) return;
+    const item = furniture.find((f) => f.id === id);
+    if (item?.fabricObj) {
+      canvas.remove(item.fabricObj);
+      canvas.renderAll();
+      if (selected?.data?.id === id) setSelected(null);
+    }
+    setFurniture((prev) => prev.filter((f) => f.id !== id));
     setRenderedUrl(null);
   };
 
@@ -309,7 +353,12 @@ export default function HomePage() {
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageBase64, furnitureContext }),
+        body: JSON.stringify({
+          imageBase64,
+          furnitureContext,
+          selectedStyle,
+          referencePhotoBase64,
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -337,6 +386,53 @@ export default function HomePage() {
     }
   };
 
+  const handleRefineRender = async () => {
+    if (!renderedUrl || !refinementPrompt.trim()) return;
+    setIsProcessing(true);
+    const currentRender = renderedUrl;
+    setRenderedUrl(null);
+    try {
+      setProcessingMsg("Refinando render...");
+      const res = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: currentRender,
+          furnitureContext: "",
+          selectedStyle,
+          referencePhotoBase64,
+          refinementPrompt: refinementPrompt.trim(),
+          isRefinement: true,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Error al refinar render");
+      }
+      const { predictionId, imageUrl: directImageUrl } = await res.json();
+      if (directImageUrl) {
+        setRenderedUrl(directImageUrl);
+        setRefinementPrompt("");
+      } else {
+        setProcessingMsg("Refinando con IA...");
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const statusRes = await fetch(`/api/status?id=${predictionId}`);
+          const { status, imageUrl, error } = await statusRes.json();
+          if (status === "succeeded") { setRenderedUrl(imageUrl); setRefinementPrompt(""); break; }
+          if (status === "failed" || status === "canceled") throw new Error(error || "El refinamiento fallo");
+          setProcessingMsg(`Refinando... (${(i + 1) * 3}s)`);
+        }
+      }
+    } catch (err: any) {
+      setRenderedUrl(currentRender);
+      setErrorMsg(err.message || "Error al refinar");
+    } finally {
+      setIsProcessing(false);
+      setProcessingMsg("");
+    }
+  };
+
   const handleDownload = () => {
     const link = document.createElement("a");
     const multiplier = exportQuality === "print" ? 4 : exportQuality === "hd" ? 2 : 1;
@@ -349,6 +445,8 @@ export default function HomePage() {
     }
     link.click();
   };
+
+  const styleLabel = selectedStyle ? STYLES.find((s) => s.id === selectedStyle)?.label : null;
 
   return (
     <div className="flex flex-col h-screen bg-stone-100 text-stone-900 overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -397,6 +495,83 @@ export default function HomePage() {
               <input ref={roomInputRef} type="file" accept="image/*" className="hidden" onChange={handleRoomUpload} />
             </section>
 
+            {/* Style suggestions */}
+            <section>
+              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Estilo</p>
+              <button
+                onClick={() => setShowStylePanel((v) => !v)}
+                className={`w-full border py-3 text-center text-[10px] tracking-[0.2em] uppercase transition-all ${
+                  selectedStyle
+                    ? "border-stone-900 text-stone-900"
+                    : "border-stone-200 text-stone-400 hover:border-stone-400 hover:text-stone-600"
+                }`}
+              >
+                {styleLabel ? styleLabel : "Elegir estilo"}
+              </button>
+
+              {showStylePanel && (
+                <div className="mt-2 border border-stone-100 bg-stone-50">
+                  <div className="grid grid-cols-2 gap-px bg-stone-100">
+                    {STYLES.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => {
+                          setSelectedStyle(selectedStyle === s.id ? null : s.id);
+                          setShowStylePanel(false);
+                        }}
+                        className={`bg-white p-2.5 text-left transition-all ${
+                          selectedStyle === s.id ? "bg-stone-900 text-white" : "hover:bg-stone-50"
+                        }`}
+                      >
+                        <div className={`text-[10px] font-medium tracking-wide ${selectedStyle === s.id ? "text-white" : "text-stone-800"}`}>
+                          {s.label}
+                        </div>
+                        <div className={`text-[8px] mt-0.5 leading-tight ${selectedStyle === s.id ? "text-stone-300" : "text-stone-400"}`}>
+                          {s.desc}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedStyle && (
+                    <button
+                      onClick={() => { setSelectedStyle(null); setShowStylePanel(false); }}
+                      className="w-full py-2 text-[9px] tracking-[0.2em] uppercase text-stone-400 hover:text-stone-700 transition-colors"
+                    >
+                      Quitar estilo
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* Reference / inspiration photo */}
+            <section>
+              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Foto referencia</p>
+              {referencePhotoBase64 ? (
+                <div className="relative">
+                  <img src={referencePhotoBase64} alt="Referencia" className="w-full h-24 object-cover border border-stone-200" />
+                  <button
+                    onClick={() => setReferencePhotoBase64(null)}
+                    className="absolute top-1 right-1 bg-white/90 text-stone-500 hover:text-stone-900 text-[10px] w-5 h-5 flex items-center justify-center border border-stone-200 transition-colors"
+                  >
+                    x
+                  </button>
+                  <p className="text-[8px] text-stone-400 mt-1 tracking-wider">La IA imitará este estilo</p>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => referenceInputRef.current?.click()}
+                    className="w-full border border-dashed border-stone-200 py-3 text-center text-[10px] tracking-[0.2em] uppercase text-stone-400 hover:border-stone-400 hover:text-stone-600 transition-all"
+                  >
+                    + Subir inspiracion
+                  </button>
+                  <p className="text-[8px] text-stone-400 mt-1.5 tracking-wider">Foto de decoración que te guste</p>
+                </>
+              )}
+              <input ref={referenceInputRef} type="file" accept="image/*" className="hidden" onChange={handleReferencePhotoUpload} />
+            </section>
+
             {/* Furniture */}
             <section>
               <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Muebles</p>
@@ -412,23 +587,34 @@ export default function HomePage() {
               {furniture.length > 0 && (
                 <div className="mt-3 space-y-px">
                   {furniture.map((item) => (
-                    <button
+                    <div
                       key={item.id}
-                      onClick={() => selectFurnitureItem(item)}
-                      className={`w-full flex items-center gap-3 p-2.5 text-left border transition-all ${
+                      className={`flex items-center gap-2 border transition-all ${
                         selected?.data?.id === item.id
                           ? "border-stone-900 bg-stone-50"
                           : "border-transparent hover:border-stone-200"
                       }`}
                     >
-                      <img src={item.thumbnail} alt={item.name} className="w-9 h-9 object-contain flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[11px] text-stone-700 truncate block">{item.name}</span>
-                        {item.direction && (
-                          <span className="text-[9px] text-stone-400 truncate block">{item.direction}</span>
-                        )}
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => selectFurnitureItem(item)}
+                        className="flex items-center gap-3 p-2.5 text-left flex-1 min-w-0"
+                      >
+                        <img src={item.thumbnail} alt={item.name} className="w-9 h-9 object-contain flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-[11px] text-stone-700 truncate block">{item.name}</span>
+                          {item.direction && (
+                            <span className="text-[9px] text-stone-400 truncate block">{item.direction}</span>
+                          )}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => deleteFurnitureById(item.id)}
+                        className="pr-2.5 text-stone-300 hover:text-stone-700 transition-colors text-[14px] flex-shrink-0"
+                        title="Eliminar"
+                      >
+                        x
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -447,18 +633,6 @@ export default function HomePage() {
                   <input
                     type="range" min={20} max={300} value={scaleVal}
                     onChange={(e) => applyScale(Number(e.target.value))}
-                    className="w-full accent-stone-900"
-                  />
-                </div>
-
-                {/* Rotation */}
-                <div>
-                  <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
-                    <span>Rotacion</span><span>{rotateVal}deg</span>
-                  </div>
-                  <input
-                    type="range" min={-180} max={180} value={rotateVal}
-                    onChange={(e) => applyRotate(Number(e.target.value))}
                     className="w-full accent-stone-900"
                   />
                 </div>
@@ -555,29 +729,61 @@ export default function HomePage() {
 
         {/* Canvas / Render area */}
         <main className="flex-1 flex items-center justify-center bg-stone-100 overflow-hidden p-8">
-          {renderedUrl ? (
+
+          {/* Canvas — always in DOM to preserve Fabric state */}
+          <div className={`relative ${renderedUrl ? "hidden" : ""}`}>
+            <div ref={canvasRef} className="shadow-sm overflow-hidden" />
+            {!roomLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="text-center text-stone-300">
+                  <p className="text-[11px] tracking-[0.3em] uppercase">Sube una foto</p>
+                  <p className="text-[10px] mt-1 tracking-[0.2em]">de la habitacion vacia</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Rendered result */}
+          {renderedUrl && (
             <div className="flex flex-col items-center gap-4 max-w-full max-h-full">
               <div className="relative">
                 <img
                   src={renderedUrl}
                   alt="Render fotorrealista"
-                  className="max-w-full max-h-[calc(100vh-200px)] object-contain shadow-sm"
+                  className="max-w-full max-h-[calc(100vh-260px)] object-contain shadow-sm"
                 />
                 <div className="absolute top-3 left-3 bg-white/90 px-3 py-1.5 text-[9px] text-stone-700 tracking-[0.25em] uppercase">
                   Render completado
                 </div>
               </div>
 
-              {/* Render action buttons */}
+              {/* Refinement prompt */}
+              <div className="flex gap-2 w-full max-w-xl">
+                <input
+                  type="text"
+                  placeholder="Ajusta el render: ej. más luz natural, pared más oscura..."
+                  value={refinementPrompt}
+                  onChange={(e) => setRefinementPrompt(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && refinementPrompt.trim()) handleRefineRender(); }}
+                  className="flex-1 border-b border-stone-300 focus:border-stone-900 bg-transparent text-[11px] text-stone-900 py-2 outline-none transition-colors placeholder-stone-300"
+                />
+                <button
+                  onClick={handleRefineRender}
+                  disabled={!refinementPrompt.trim() || isProcessing}
+                  className="px-4 py-2 bg-stone-700 text-white text-[9px] tracking-[0.2em] uppercase hover:bg-stone-900 disabled:bg-stone-200 disabled:text-stone-400 transition-colors flex-shrink-0"
+                >
+                  Refinar
+                </button>
+              </div>
+
+              {/* Action buttons */}
               <div className="flex gap-3">
-                {/* Use render as new base for iterative editing */}
                 <button
                   onClick={handleUseAsBase}
                   className="px-5 py-2.5 bg-stone-900 text-white text-[10px] tracking-[0.25em] uppercase hover:bg-stone-700 transition-colors"
                 >
                   Continuar desde aqui
                 </button>
-                {/* Go back to canvas without changing base */}
                 <button
                   onClick={() => setRenderedUrl(null)}
                   className="px-5 py-2.5 border border-stone-400 text-stone-600 text-[10px] tracking-[0.25em] uppercase hover:border-stone-900 hover:text-stone-900 transition-all"
@@ -587,20 +793,8 @@ export default function HomePage() {
               </div>
 
               <p className="text-[9px] text-stone-400 tracking-[0.2em] uppercase text-center">
-                Continuar desde aqui carga el render como nueva base para seguir ajustando
+                Continuar carga el render como base y limpia los muebles del canvas
               </p>
-            </div>
-          ) : (
-            <div className="relative">
-              <div ref={canvasRef} className="shadow-sm overflow-hidden" />
-              {!roomLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-center text-stone-300">
-                    <p className="text-[11px] tracking-[0.3em] uppercase">Sube una foto</p>
-                    <p className="text-[10px] mt-1 tracking-[0.2em]">de la habitacion vacia</p>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </main>
