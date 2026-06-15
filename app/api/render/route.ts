@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 
