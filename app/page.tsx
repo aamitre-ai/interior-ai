@@ -49,6 +49,9 @@ export default function HomePage() {
   // Reference / inspiration photo
   const [referencePhotoBase64, setReferencePhotoBase64] = useState<string | null>(null);
 
+  // Initial prompt (pre-render, from the start)
+  const [initialPrompt, setInitialPrompt] = useState("");
+
   // Refinement prompt (post-render)
   const [refinementPrompt, setRefinementPrompt] = useState("");
 
@@ -358,6 +361,7 @@ export default function HomePage() {
           furnitureContext,
           selectedStyle,
           referencePhotoBase64,
+          initialPrompt: initialPrompt.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -570,6 +574,19 @@ export default function HomePage() {
                 </>
               )}
               <input ref={referenceInputRef} type="file" accept="image/*" className="hidden" onChange={handleReferencePhotoUpload} />
+            </section>
+
+            {/* Initial prompt */}
+            <section>
+              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Descripcion / Prompt</p>
+              <textarea
+                rows={3}
+                placeholder="ej. habitacion luminosa con sofá gris, paredes blancas, estilo nórdico..."
+                value={initialPrompt}
+                onChange={(e) => setInitialPrompt(e.target.value)}
+                className="w-full border border-stone-200 focus:border-stone-900 bg-transparent text-[11px] text-stone-900 p-2 outline-none transition-colors placeholder-stone-300 resize-none leading-relaxed"
+              />
+              <p className="text-[8px] text-stone-400 mt-1 tracking-wider">La IA tomará esto en cuenta al renderizar</p>
             </section>
 
             {/* Furniture */}
@@ -804,22 +821,4 @@ export default function HomePage() {
       {isProcessing && (
         <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white border border-stone-200 p-10 text-center max-w-xs shadow-sm">
-            <div
-              className="w-5 h-5 border border-stone-900 border-t-transparent mx-auto mb-5"
-              style={{ animation: "spin 0.9s linear infinite", borderRadius: "50%" }}
-            />
-            <p className="text-[10px] tracking-[0.25em] uppercase text-stone-700">{processingMsg}</p>
-            <p className="text-[9px] text-stone-400 mt-2 tracking-wider">Por favor espera</p>
-          </div>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        input[type=range] { -webkit-appearance: none; appearance: none; height: 1px; background: #d6d3d1; }
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #1c1917; cursor: pointer; }
-        input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #1c1917; cursor: pointer; border: none; }
-      `}</style>
-    </div>
-  );
-}
+            <
