@@ -7,11 +7,11 @@ const STYLE_PROMPTS = {
   minimalista: "Minimalist style: clean lines, neutral palette of whites and grays, uncluttered space, functional furniture",
   mediterraneo: "Mediterranean style: terracotta tiles, warm ochre walls, linen fabrics, arched doorways, natural materials",
   japandi: "Japandi style (Japanese-Scandinavian fusion): wabi-sabi aesthetics, natural wood, muted earthy tones, zen simplicity",
-  bohemio: "Bohemian style: layered colorful textiles, eclectic mix of patterns, macramé, indoor plants, warm jewel tones",
+  bohemio: "Bohemian style: layered colorful textiles, eclectic mix of patterns, macrame, indoor plants, warm jewel tones",
   art_deco: "Art Deco style: geometric patterns, luxurious gold accents, velvet upholstery, mirrored surfaces, bold symmetry",
   rustico: "Rustic style: rough-hewn wood beams, stone walls, warm amber lighting, handcrafted elements, natural materials",
   clasico: "Classic elegant style: refined furniture, warm neutral tones, crown molding, tasteful artwork, balanced symmetry",
-  contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated décor",
+  contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated decor",
 };
 
 export async function POST(req: NextRequest) {
@@ -35,40 +35,41 @@ export async function POST(req: NextRequest) {
 
     let prompt: string;
     if (isRefinement && refinementPrompt) {
-      prompt = `You are an expert interior designer and photo-realistic renderer.
-You previously rendered an interior design. Now the client wants adjustments.
+      prompt = `You are an expert interior designer creating a photo-realistic architectural visualization.
 
-REQUIRED CHANGES (you MUST apply all of these):
-${refinementPrompt}
+TASK: Apply the following modifications to the interior design shown:
+${refinementPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n")}
 
-Apply ALL of the above changes precisely. Do not ignore any element mentioned.
-Maintain the overall composition, lighting quality, and photo-realism.
-Output: A single photo-realistic interior design rendering with all requested changes applied.`;
+RULES:
+- Apply all listed changes precisely in the physical space
+- Maintain photo-realistic quality, composition, and lighting
+- Keep the same room architecture and dimensions
+- OUTPUT RULE: The final image must contain ZERO text, ZERO labels, ZERO captions, ZERO watermarks, ZERO words of any kind. Pure architectural visualization only.`;
     } else {
       const furnitureSection = furnitureContext
-        ? `\nDetected existing elements in the room (incorporate or complement):\n${furnitureContext}`
+        ? `\nExisting furniture detected in the room (keep or complement):\n${furnitureContext}`
         : "";
 
-      const userRequirementsSection = initialPrompt
-        ? `\n\n=== MANDATORY CLIENT REQUIREMENTS ===\nThe following MUST appear in the final render. Do not omit any of these elements:\n"${initialPrompt}"\n=== END REQUIREMENTS ===`
+      const designElements = initialPrompt
+        ? `\n\nAdditional design elements to physically incorporate into the room:\n${initialPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n") || "- " + initialPrompt}`
         : "";
 
       const refPhotoSection = referencePhotoBase64
-        ? "\n\nA reference style photo is provided as the second image. Match its aesthetic, color palette, and mood closely."
+        ? "\n\nMatch the aesthetic, color palette, and mood of the reference photo provided as the second image."
         : "";
 
       prompt = `You are an expert interior designer creating a photo-realistic architectural visualization.
 
-TASK: Transform the provided room photo into a stunning ${styleDesc} rendering.${userRequirementsSection}${furnitureSection}${refPhotoSection}
+TASK: Transform the room in the provided photo into a ${styleDesc} design.${designElements}${furnitureSection}${refPhotoSection}
 
-DESIGN RULES:
-- Preserve the room's original architecture: walls, floor plan, windows, doors
-- Apply the ${styleDesc} consistently: furniture, colors, materials, lighting
-- Add appropriate décor, plants, and accessories that fit the style
-- Realistic lighting with proper shadows and reflections
-- Photo-realistic render quality — NOT a sketch or illustration
+DESIGN REQUIREMENTS:
+- Preserve the room architecture: walls, windows, doors, floor layout
+- Apply the ${styleDesc} throughout: all furniture, materials, colors, lighting fixtures
+- Add style-appropriate accessories, plants, rugs, and artwork
+- Photo-realistic lighting with shadows, reflections, and depth
+- Professional architectural render quality
 
-OUTPUT: One photo-realistic interior design render of the transformed room.`;
+CRITICAL OUTPUT RULE: The rendered image must contain absolutely NO text, NO words, NO labels, NO numbers, NO captions, NO watermarks, NO signs, NO typography of any kind. Produce a pure photo-realistic room visualization with only physical design elements visible.`;
     }
 
     const toInlinePart = (dataUrl: string) => {
