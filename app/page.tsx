@@ -307,21 +307,27 @@ export default function HomePage() {
         const err = await res.json();
         throw new Error(err.error || "Error al iniciar render");
       }
-      const { predictionId } = await res.json();
+      const { predictionId, imageUrl: directImageUrl } = await res.json();
 
-      setProcessingMsg("Procesando con IA...");
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
-        const statusRes = await fetch(`/api/status?id=${predictionId}`);
-        const { status, imageUrl, error } = await statusRes.json();
-        if (status === "succeeded") {
-          setRenderedUrl(imageUrl);
-          break;
+      if (directImageUrl) {
+        // Gemini returns the image directly (synchronous) — no polling needed
+        setRenderedUrl(directImageUrl);
+      } else {
+        // Fallback: Replicate-style async polling
+        setProcessingMsg("Procesando con IA...");
+        for (let i = 0; i < 60; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const statusRes = await fetch(`/api/status?id=${predictionId}`);
+          const { status, imageUrl, error } = await statusRes.json();
+          if (status === "succeeded") {
+            setRenderedUrl(imageUrl);
+            break;
+          }
+          if (status === "failed" || status === "canceled") {
+            throw new Error(error || "El render falló");
+          }
+          setProcessingMsg(`Generando... (${(i + 1) * 3}s)`);
         }
-        if (status === "failed" || status === "canceled") {
-          throw new Error(error || "El render falló");
-        }
-        setProcessingMsg(`Generando... (${(i + 1) * 3}s)`);
       }
     } catch (err: any) {
       setErrorMsg(err.message || "Error al renderizar");
