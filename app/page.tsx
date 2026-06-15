@@ -379,7 +379,7 @@ export default function HomePage() {
   return (
     <div className="flex flex-col h-screen bg-stone-100 text-stone-900 overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
 
-      {/* ── Header ── */}
+      {/* Header */}
       <header className="flex items-center justify-between px-8 py-3 bg-white border-b border-stone-200 flex-shrink-0">
         <span className="text-[11px] font-semibold tracking-[0.3em] uppercase text-stone-900">
           Home Staging Studio
@@ -397,19 +397,19 @@ export default function HomePage() {
       {errorMsg && (
         <div className="flex items-center justify-between px-6 py-2 bg-stone-900 text-white text-[11px] flex-shrink-0">
           <span>{errorMsg}</span>
-          <button onClick={() => setErrorMsg(null)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">✕</button>
+          <button onClick={() => setErrorMsg(null)} className="ml-4 opacity-50 hover:opacity-100 transition-opacity">x</button>
         </div>
       )}
 
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── Left Sidebar ── */}
+        {/* Left Sidebar */}
         <aside className="w-64 bg-white border-r border-stone-200 flex flex-col overflow-y-auto flex-shrink-0">
           <div className="p-5 space-y-7">
 
             {/* Room photo */}
             <section>
-              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Habitación</p>
+              <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400 mb-3">Habitacion</p>
               <button
                 onClick={() => roomInputRef.current?.click()}
                 className={`w-full border py-4 text-center transition-all text-[10px] tracking-[0.2em] uppercase ${
@@ -418,7 +418,7 @@ export default function HomePage() {
                     : "border-stone-200 text-stone-400 hover:border-stone-400 hover:text-stone-600"
                 }`}
               >
-                {roomLoaded ? "✓  Foto cargada" : "Subir foto"}
+                {roomLoaded ? "Foto cargada" : "Subir foto"}
               </button>
               <input ref={roomInputRef} type="file" accept="image/*" className="hidden" onChange={handleRoomUpload} />
             </section>
@@ -431,7 +431,7 @@ export default function HomePage() {
                 disabled={!isReady}
                 className="w-full border border-stone-200 py-3 text-center text-[10px] tracking-[0.2em] uppercase text-stone-400 hover:border-stone-400 hover:text-stone-600 transition-all disabled:opacity-30"
               >
-                + Añadir mueble
+                + Anadir mueble
               </button>
               <input ref={furnitureInputRef} type="file" accept="image/*" className="hidden" onChange={handleFurnitureUpload} />
 
@@ -451,7 +451,7 @@ export default function HomePage() {
                       <div className="flex-1 min-w-0">
                         <span className="text-[11px] text-stone-700 truncate block">{item.name}</span>
                         {item.direction && (
-                          <span className="text-[9px] text-stone-400 truncate block">↳ {item.direction}</span>
+                          <span className="text-[9px] text-stone-400 truncate block">{item.direction}</span>
                         )}
                       </div>
                     </button>
@@ -460,47 +460,46 @@ export default function HomePage() {
               )}
             </section>
 
-            {/* Controls */}
+            {/* Controls - shown when furniture selected */}
             {selected && (
               <section className="border-t border-stone-100 pt-6 space-y-5">
-                <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400">Ajustes del mueble</p>
+                <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400">Ajustes</p>
 
                 {/* Scale */}
                 <div>
                   <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
-                    <span>Tamaño</span><span>{scaleVal}%</span>
+                    <span>Tamano</span><span>{scaleVal}%</span>
                   </div>
                   <input
                     type="range" min={20} max={300} value={scaleVal}
                     onChange={(e) => applyScale(Number(e.target.value))}
-                    className="w-full accent-stone-900" style={{ height: "1px" }}
+                    className="w-full accent-stone-900"
                   />
                 </div>
 
-                {/* Z-Rotation (tilt) */}
+                {/* Z-Rotation */}
                 <div>
                   <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
-                    <span>Inclinación</span><span>{rotateVal}°</span>
+                    <span>Inclinacion</span><span>{rotateVal}deg</span>
                   </div>
                   <input
                     type="range" min={-180} max={180} value={rotateVal}
                     onChange={(e) => applyRotate(Number(e.target.value))}
-                    className="w-full accent-stone-900" style={{ height: "1px" }}
+                    className="w-full accent-stone-900"
                   />
                 </div>
 
-                {/* Y-Rotation (spin around own axis) */}
+                {/* Y-Rotation */}
                 <div>
                   <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
                     <span>Giro propio</span>
-                    <span>{Math.round(rotateYVal)}°</span>
+                    <span>{Math.round(rotateYVal)}deg</span>
                   </div>
                   <input
                     type="range" min={0} max={360} value={rotateYVal}
                     onChange={(e) => applyRotateY(Number(e.target.value))}
-                    className="w-full accent-stone-900" style={{ height: "1px" }}
+                    className="w-full accent-stone-900"
                   />
-                  {/* Quick presets */}
                   <div className="grid grid-cols-4 gap-1 mt-2">
                     {yPresets.map(({ deg, label }) => {
                       const diff = Math.abs(rotateYVal - deg);
@@ -536,17 +535,17 @@ export default function HomePage() {
                     <input
                       type="range" min={0} max={80} value={colorAlpha}
                       onChange={(e) => { const v = Number(e.target.value); setColorAlpha(v); applyColor(color, v); }}
-                      className="flex-1 accent-stone-900" style={{ height: "1px" }}
+                      className="flex-1 accent-stone-900"
                     />
                     {colorAlpha > 0 && (
-                      <button onClick={() => { setColorAlpha(0); applyColor(color, 0); }} className="text-[9px] text-stone-400 hover:text-stone-900 transition-colors">✕</button>
+                      <button onClick={() => { setColorAlpha(0); applyColor(color, 0); }} className="text-[9px] text-stone-400 hover:text-stone-900 transition-colors">x</button>
                     )}
                   </div>
                 </div>
 
                 {/* Direction note */}
                 <div>
-                  <div className="text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">Dirección / nota</div>
+                  <div className="text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">Nota de direccion</div>
                   <input
                     type="text"
                     placeholder="ej. mira hacia la TV"
@@ -564,7 +563,7 @@ export default function HomePage() {
                 {/* Quick actions */}
                 <div className="grid grid-cols-3 gap-1">
                   <button onClick={flipHorizontal} className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Voltear</button>
-                  <button onClick={sendToBack}    className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Al fondo</button>
+                  <button onClick={sendToBack}    className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Fondo</button>
                   <button onClick={bringToFront}  className="text-[9px] border border-stone-200 hover:border-stone-500 py-2 text-stone-500 tracking-wider uppercase transition-all">Frente</button>
                 </div>
 
@@ -585,8 +584,91 @@ export default function HomePage() {
               <p className="text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">Exportar</p>
               <select
                 value={exportQuality}
-                onChange={(e) => setExportQuality(e.target.value as any)}
+                onChange={(e) => setExportQuality(e.target.value as "web" | "hd" | "print")}
                 className="w-full border border-stone-200 bg-white text-[11px] text-stone-700 py-2 px-2 focus:border-stone-900 outline-none transition-colors"
               >
-                <option value="web">Web  (1×)</option>
-                <option value="
+                <option value="web">Web (1x)</option>
+                <option value="hd">HD (2x)</option>
+                <option value="print">Impresion (4x)</option>
+              </select>
+            </div>
+
+            <button
+              onClick={handleRender}
+              disabled={!roomLoaded || isProcessing}
+              className="w-full py-3 bg-stone-900 hover:bg-stone-700 disabled:bg-stone-200 disabled:text-stone-400 text-white text-[10px] tracking-[0.3em] uppercase transition-colors"
+            >
+              {isProcessing ? processingMsg : "Renderizar"}
+            </button>
+
+            <button
+              onClick={handleDownload}
+              disabled={!roomLoaded && !renderedUrl}
+              className="w-full py-2.5 border border-stone-900 text-stone-900 hover:bg-stone-900 hover:text-white disabled:border-stone-200 disabled:text-stone-300 text-[10px] tracking-[0.25em] uppercase transition-all"
+            >
+              Descargar
+            </button>
+
+            {renderedUrl && (
+              <button
+                onClick={() => setRenderedUrl(null)}
+                className="w-full py-2 text-[9px] text-stone-400 hover:text-stone-900 tracking-[0.2em] uppercase transition-colors"
+              >
+                Editor
+              </button>
+            )}
+          </div>
+        </aside>
+
+        {/* Canvas area */}
+        <main className="flex-1 flex items-center justify-center bg-stone-100 overflow-hidden p-8">
+          {renderedUrl ? (
+            <div className="relative max-w-full max-h-full">
+              <img
+                src={renderedUrl}
+                alt="Render fotorrealista"
+                className="max-w-full max-h-[calc(100vh-100px)] object-contain shadow-sm"
+              />
+              <div className="absolute top-3 left-3 bg-white/90 px-3 py-1.5 text-[9px] text-stone-700 tracking-[0.25em] uppercase">
+                Render completado
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <div ref={canvasRef} className="shadow-sm overflow-hidden" />
+              {!roomLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-center text-stone-300">
+                    <p className="text-[11px] tracking-[0.3em] uppercase">Sube una foto</p>
+                    <p className="text-[10px] mt-1 tracking-[0.2em]">de la habitacion vacia</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Processing overlay */}
+      {isProcessing && (
+        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white border border-stone-200 p-10 text-center max-w-xs shadow-sm">
+            <div
+              className="w-5 h-5 border border-stone-900 border-t-transparent mx-auto mb-5"
+              style={{ animation: "spin 0.9s linear infinite", borderRadius: "50%" }}
+            />
+            <p className="text-[10px] tracking-[0.25em] uppercase text-stone-700">{processingMsg}</p>
+            <p className="text-[9px] text-stone-400 mt-2 tracking-wider">Por favor espera</p>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        input[type=range] { -webkit-appearance: none; appearance: none; height: 1px; background: #d6d3d1; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #1c1917; cursor: pointer; }
+        input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #1c1917; cursor: pointer; border: none; }
+      `}</style>
+    </div>
+  );
+}
