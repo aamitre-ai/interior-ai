@@ -38,33 +38,37 @@ export async function POST(req: NextRequest) {
       prompt = `You are an expert interior designer and photo-realistic renderer.
 You previously rendered an interior design. Now the client wants adjustments.
 
-Refinement request: "${refinementPrompt}"
+REQUIRED CHANGES (you MUST apply all of these):
+${refinementPrompt}
 
-Apply these changes while maintaining the overall composition, lighting, and quality.
-Produce a photo-realistic interior design rendering that incorporates the requested changes.`;
+Apply ALL of the above changes precisely. Do not ignore any element mentioned.
+Maintain the overall composition, lighting quality, and photo-realism.
+Output: A single photo-realistic interior design rendering with all requested changes applied.`;
     } else {
       const furnitureSection = furnitureContext
-        ? `\nExisting furniture and items detected in the room:\n${furnitureContext}\nIncorporate or complement these existing elements in your design.`
+        ? `\nDetected existing elements in the room (incorporate or complement):\n${furnitureContext}`
         : "";
-      const userPromptSection = initialPrompt
-        ? `\nAdditional client description: "${initialPrompt}"`
+
+      const userRequirementsSection = initialPrompt
+        ? `\n\n=== MANDATORY CLIENT REQUIREMENTS ===\nThe following MUST appear in the final render. Do not omit any of these elements:\n"${initialPrompt}"\n=== END REQUIREMENTS ===`
         : "";
+
       const refPhotoSection = referencePhotoBase64
-        ? "\nA reference style photo has been provided as the second image. Use it as inspiration for the aesthetic, color palette, and mood."
+        ? "\n\nA reference style photo is provided as the second image. Match its aesthetic, color palette, and mood closely."
         : "";
 
-      prompt = `You are an expert interior designer and photo-realistic renderer.
-Transform this room photo into a stunning ${styleDesc} interior design rendering.${furnitureSection}${userPromptSection}${refPhotoSection}
+      prompt = `You are an expert interior designer creating a photo-realistic architectural visualization.
 
-Requirements:
-- Create a photo-realistic render, not a drawing or illustration
-- Maintain the room's original architecture, dimensions, and window/door positions
-- Apply the specified style consistently throughout: furniture, colors, textures, lighting
-- Ensure proper lighting with realistic shadows and reflections
-- Add appropriate décor, plants, and accessories that complement the style
-- The result should look like a professional architectural visualization
+TASK: Transform the provided room photo into a stunning ${styleDesc} rendering.${userRequirementsSection}${furnitureSection}${refPhotoSection}
 
-Output: A single photo-realistic interior design rendering of the transformed room.`;
+DESIGN RULES:
+- Preserve the room's original architecture: walls, floor plan, windows, doors
+- Apply the ${styleDesc} consistently: furniture, colors, materials, lighting
+- Add appropriate décor, plants, and accessories that fit the style
+- Realistic lighting with proper shadows and reflections
+- Photo-realistic render quality — NOT a sketch or illustration
+
+OUTPUT: One photo-realistic interior design render of the transformed room.`;
     }
 
     const toInlinePart = (dataUrl: string) => {
