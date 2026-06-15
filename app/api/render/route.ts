@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
       furnitureContext,
       selectedStyle,
       referencePhotoBase64,
+      initialPrompt,
       refinementPrompt,
       isRefinement,
     } = await req.json();
@@ -76,6 +77,10 @@ Output: A single photorealistic interior design image in the same dimensions and
         ? "\n\nA reference/inspiration image has been provided as the second image. Replicate its style, color palette, lighting mood, and material choices in the rendered output."
         : "";
 
+      const initialNote = initialPrompt
+        ? `\n\nAdditional instructions from the user: "${initialPrompt}". Incorporate these directions into the render.`
+        : "";
+
       prompt = `You are a professional interior design AI specializing in photorealistic home staging renders.
 
 The first image shows a room with furniture items placed by the user. Transform this into a stunning photorealistic interior design render.
@@ -86,7 +91,7 @@ Requirements:
 - Add realistic lighting, shadows, and reflections
 - Enhance walls, floors, and ceiling with realistic finishes
 - Add appropriate ambient objects (plants, artwork, cushions, rugs, lamps) to complete the staging
-- The result should look like a professional real estate or interior design photography${styleNote}${furnitureNote}${referenceNote}
+- The result should look like a professional real estate or interior design photography${styleNote}${furnitureNote}${referenceNote}${initialNote}
 
 Output: A single photorealistic interior design image at the same dimensions and perspective as the input. Output the image only, no text or commentary.`;
     }
