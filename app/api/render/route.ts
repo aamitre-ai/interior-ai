@@ -1,80 +1,137 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
+
+const STYLE_PROMPTS: Record<string, string> = {
+  nordico: "Scandinavian Nordic style: light birch wood, white and cream tones, minimalist furniture, cozy textiles, natural light",
+  industrial: "Industrial style: exposed brick, dark steel, reclaimed wood, Edison bulbs, raw concrete surfaces",
+  minimalista: "Minimalist style: clean lines, neutral palette of whites and grays, uncluttered space, functional furniture",
+  mediterraneo: "Mediterranean style: terracotta tiles, warm ochre walls, linen fabrics, arched doorways, natural materials",
+  japandi: "Japandi style (Japanese-Scandinavian fusion): wabi-sabi aesthetics, natural wood, muted earthy tones, zen simplicity",
+  bohemio: "Bohemian style: layered colorful textiles, eclectic mix of patterns, macramé, indoor plants, warm jewel tones",
+  art_deco: "Art Deco style: geometric patterns, luxurious gold accents, velvet upholstery, mirrored surfaces, bold symmetry",
+  rustico: "Rustic style: rough-hewn wood beams, stone walls, warm amber lighting, handcrafted elements, natural materials",
+  clasico: "Classic elegant style: refined furniture, warm neutral tones, crown molding, tasteful artwork, balanced symmetry",
+  contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated décor",
+};
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageBase64, furnitureContext } = await req.json();
+    const {
+      imageBase64,
+      furnitureContext,
+      selectedStyle,
+      referencePhotoBase64,
+      refinementPrompt,
+      isRefinement,
+    } = await req.json();
 
     const apiKey = process.env.GOOGLE_AI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "GOOGLE_AI_API_KEY no está configurada en las variables de entorno" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "GOOGLE_AI_API_KEY no configurada" }, { status: 500 });
     }
 
-    // Strip data URL prefix if present
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-    let prompt =
-      "This is a home staging composite: a real room photo with furniture images placed on top digitally. " +
-      "Transform this into a single, photorealistic professional interior design photograph. " +
-      "Integrate all furniture naturally into the scene: match the room's ambient lighting and color temperature, " +
-      "add realistic contact shadows and soft reflections on the floor, blend material textures with the environment, " +
-      "and make perspective and scale feel correct. " +
-      "The final image should look indistinguishable from a real photo taken by a professional architectural photographer. " +
-      "Preserve the room's architecture (walls, windows, floor, ceiling) exactly as they appear.";
+    // Build image part from base64 data URL
+    const toImagePart = (dataUrl: string) => {
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) throw new Error("Invalid image format");
+      return {
+        inlineData: {
+          mimeType: match[1] as string,
+          data: match[2],
+        },
+      };
+    };
 
-    if (furnitureContext) {
-      prompt += ` Important placement notes for the furniture: ${furnitureContext}.`;
+    // ---- Build prompt ----
+    let prompt: string;
+
+    if (isRefinement && refinementPrompt) {
+      // Refinement mode: improve the existing render based on user instruction
+      const styleNote = selectedStyle && STYLE_PROMPTS[selectedStyle]
+        ? ` Maintain the ${STYLE_PROMPTS[selectedStyle]} aesthetic.`
+        : "";
+
+      prompt = `You are a professional interior design rendering AI. You have been given an existing photorealistic room render.
+
+Please refine and improve this render based on the following instruction from the user:
+"${refinementPrompt}"
+
+Maintain the overall room layout and furniture arrangement. Only apply the specific changes requested.${styleNote}
+
+Output: A single photorealistic interior design image in the same dimensions and perspective as the input. Output the image only, no text.`;
+    } else {
+      // Standard render mode
+      const styleNote = selectedStyle && STYLE_PROMPTS[selectedStyle]
+        ? `\n\nApply the following decoration style: ${STYLE_PROMPTS[selectedStyle]}.`
+        : "";
+
+      const furnitureNote = furnitureContext
+        ? `\n\nFurniture context notes:\n${furnitureContext}`
+        : "";
+
+      const referenceNote = referencePhotoBase64
+        ? "\n\nA reference/inspiration image has been provided as the second image. Replicate its style, color palette, lighting mood, and material choices in the rendered output."
+        : "";
+
+      prompt = `You are a professional interior design AI specializing in photorealistic home staging renders.
+
+The first image shows a room with furniture items placed by the user. Transform this into a stunning photorealistic interior design render.
+
+Requirements:
+- Keep all furniture items in their exact positions as shown
+- Make every surface, material, and texture photorealistic
+- Add realistic lighting, shadows, and reflections
+- Enhance walls, floors, and ceiling with realistic finishes
+- Add appropriate ambient objects (plants, artwork, cushions, rugs, lamps) to complete the staging
+- The result should look like a professional real estate or interior design photography${styleNote}${furnitureNote}${referenceNote}
+
+Output: A single photorealistic interior design image at the same dimensions and perspective as the input. Output the image only, no text or commentary.`;
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-image:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inline_data: {
-                    mime_type: "image/jpeg",
-                    data: base64Data,
-                  },
-                },
-              ],
-            },
-          ],
-        }),
+    // ---- Build content parts ----
+    const parts: any[] = [];
+
+    // Always include the main/room image first
+    if (imageBase64) {
+      parts.push(toImagePart(imageBase64));
+    }
+
+    // Include reference photo as second image if provided
+    if (referencePhotoBase64 && !isRefinement) {
+      parts.push(toImagePart(referencePhotoBase64));
+    }
+
+    // Add prompt text last
+    parts.push({ text: prompt });
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts }],
+      generationConfig: {
+        responseModalities: ["image", "text"],
+      } as any,
+    });
+
+    const response = result.response;
+    const candidates = response.candidates || [];
+
+    for (const candidate of candidates) {
+      for (const part of candidate.content?.parts || []) {
+        if (part.inlineData?.data) {
+          const mimeType = part.inlineData.mimeType || "image/png";
+          const imageUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+          return NextResponse.json({ imageUrl });
+        }
       }
-    );
-
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      const errMsg =
-        (errBody as any)?.error?.message || `Gemini API error ${response.status}`;
-      return NextResponse.json({ error: errMsg }, { status: 500 });
     }
 
-    const result = await response.json();
-    const parts: any[] = result?.candidates?.[0]?.content?.parts ?? [];
-    const imagePart = parts.find((p) => p.inlineData);
-
-    if (!imagePart) {
-      const textPart = parts.find((p) => p.text);
-      const msg = textPart?.text || "Gemini no devolvió una imagen";
-      return NextResponse.json({ error: msg }, { status: 500 });
-    }
-
-    const mimeType: string = imagePart.inlineData.mimeType ?? "image/png";
-    const imageUrl = `data:${mimeType};base64,${imagePart.inlineData.data}`;
-
-    return NextResponse.json({ imageUrl });
+    return NextResponse.json({ error: "Gemini no devolvio imagen. Intenta de nuevo." }, { status: 500 });
   } catch (err: any) {
+    console.error("Render error:", err);
     return NextResponse.json(
-      { error: err?.message || "Error interno del servidor" },
+      { error: err?.message || "Error interno al renderizar" },
       { status: 500 }
     );
   }
