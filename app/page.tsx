@@ -23,7 +23,6 @@ export default function HomePage() {
   const [colorAlpha, setColorAlpha] = useState(0);
   const [scaleVal, setScaleVal] = useState(100);
   const [rotateVal, setRotateVal] = useState(0);
-  const [rotateYVal, setRotateYVal] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMsg, setProcessingMsg] = useState("");
   const [renderedUrl, setRenderedUrl] = useState<string | null>(null);
@@ -33,13 +32,11 @@ export default function HomePage() {
   const roomInputRef = useRef<HTMLInputElement>(null);
   const furnitureInputRef = useRef<HTMLInputElement>(null);
 
-  // Size % derived from scaleY (unaffected by Y-axis rotation)
   const getSizePct = (obj: any) => {
     const base = obj.data?.baseScale || 1;
     return Math.round(Math.abs((obj.scaleY || base) / base) * 100);
   };
 
-  // Init Fabric.js
   useEffect(() => {
     let mounted = true;
     import("fabric").then((mod) => {
@@ -51,11 +48,11 @@ export default function HomePage() {
       fabricRef.current = fabric;
 
       if (!fabric?.Canvas) {
-        setErrorMsg("No se pudo cargar Fabric.js. Recarga la página.");
+        setErrorMsg("No se pudo cargar Fabric.js. Recarga la pagina.");
         return;
       }
       if (!canvasRef.current) {
-        setErrorMsg("Canvas no encontrado. Recarga la página.");
+        setErrorMsg("Canvas no encontrado. Recarga la pagina.");
         return;
       }
 
@@ -81,27 +78,21 @@ export default function HomePage() {
         });
         canvas.on("selection:cleared", () => setSelected(null));
 
-        // During manual scaling: keep scaleX in sync with Y-rotation
         canvas.on("object:scaling", (e: any) => {
           if (!e.target) return;
           const obj = e.target;
           const base = obj.data?.baseScale || 1;
-          const yAngle = obj.data?.yRotation || 0;
-          const cosVal = Math.cos((yAngle * Math.PI) / 180);
           const sizePct = Math.abs(obj.scaleY / base);
-          obj.scaleX = cosVal * sizePct * base;
+          obj.scaleX = sizePct * base;
           setScaleVal(Math.round(sizePct * 100));
         });
 
-        // After manual scale: persist sizePercent in data
         canvas.on("object:scaled", (e: any) => {
           if (!e.target) return;
           const obj = e.target;
           const base = obj.data?.baseScale || 1;
-          const yAngle = obj.data?.yRotation || 0;
-          const cosVal = Math.cos((yAngle * Math.PI) / 180);
           const sizePct = Math.abs(obj.scaleY / base);
-          obj.set({ scaleX: cosVal * sizePct * base, data: { ...obj.data, sizePercent: sizePct } });
+          obj.set({ scaleX: sizePct * base, data: { ...obj.data, sizePercent: sizePct } });
           canvas.renderAll();
         });
 
@@ -127,26 +118,37 @@ export default function HomePage() {
     setSelected(obj);
     setScaleVal(getSizePct(obj));
     setRotateVal(Math.round(obj.angle || 0));
-    setRotateYVal(obj.data?.yRotation || 0);
+  };
+
+  const loadImageAsBackground = (dataUrl: string) => {
+    const fabric = fabricRef.current;
+    const canvas = canvasObjRef.current;
+    if (!fabric || !canvas) return;
+    fabric.Image.fromURL(dataUrl, (img: any) => {
+      const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+      img.set({ scaleX: scale, scaleY: scale, left: 0, top: 0, selectable: false, evented: false });
+      canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+      setRoomLoaded(true);
+    });
   };
 
   const handleRoomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !fabricRef.current || !canvasObjRef.current) return;
+    if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
-      const fabric = fabricRef.current;
-      const canvas = canvasObjRef.current;
-      fabric.Image.fromURL(dataUrl, (img: any) => {
-        const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-        img.set({ scaleX: scale, scaleY: scale, left: 0, top: 0, selectable: false, evented: false });
-        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
-        setRoomLoaded(true);
-        setRenderedUrl(null);
-      });
+      loadImageAsBackground(dataUrl);
+      setRenderedUrl(null);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Use the rendered image as the new room base for iterative editing
+  const handleUseAsBase = () => {
+    if (!renderedUrl) return;
+    loadImageAsBackground(renderedUrl);
+    setRenderedUrl(null);
   };
 
   const handleFurnitureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -180,7 +182,7 @@ export default function HomePage() {
           top: canvas.height / 2 - (img.height * scale) / 2,
           scaleX: scale,
           scaleY: scale,
-          data: { id, baseScale: scale, sizePercent: 1, yRotation: 0 },
+          data: { id, baseScale: scale, sizePercent: 1 },
           cornerColor: "#000000",
           cornerStrokeColor: "#000000",
           borderColor: "#000000",
@@ -199,7 +201,6 @@ export default function HomePage() {
         setSelected(img);
         setScaleVal(100);
         setRotateVal(0);
-        setRotateYVal(0);
         setRenderedUrl(null);
       });
     } catch (err: any) {
@@ -243,15 +244,12 @@ export default function HomePage() {
     setRenderedUrl(null);
   }, [selected]);
 
-  // Scale: scaleY = true size; scaleX = cosY * size (Y-rotation applied)
   const applyScale = (val: number) => {
     if (!selected || !canvasObjRef.current) return;
     const base = selected.data?.baseScale || 1;
-    const yAngle = selected.data?.yRotation || 0;
-    const cosVal = Math.cos((yAngle * Math.PI) / 180);
     const sizePct = val / 100;
     selected.set({
-      scaleX: cosVal * sizePct * base,
+      scaleX: sizePct * base,
       scaleY: sizePct * base,
       data: { ...selected.data, sizePercent: sizePct },
     });
@@ -260,7 +258,6 @@ export default function HomePage() {
     setRenderedUrl(null);
   };
 
-  // Z-axis rotation (tilt on canvas)
   const applyRotate = (val: number) => {
     if (!selected || !canvasObjRef.current) return;
     selected.set({ angle: val });
@@ -269,27 +266,11 @@ export default function HomePage() {
     setRenderedUrl(null);
   };
 
-  // Y-axis rotation: simulates turning furniture around its vertical axis
-  // cos(0°)=1 → front face; cos(180°)=-1 → back/mirrored; cos(90°/270°)=0 → edge on
-  const applyRotateY = (degrees: number) => {
-    if (!selected || !canvasObjRef.current) return;
-    const base = selected.data?.baseScale || 1;
-    const sizePct = selected.data?.sizePercent ?? (Math.abs(selected.scaleY) / base);
-    const cosVal = Math.cos((degrees * Math.PI) / 180);
-    selected.set({
-      scaleX: cosVal * sizePct * base,
-      data: { ...selected.data, yRotation: degrees },
-    });
-    canvasObjRef.current.renderAll();
-    setRotateYVal(degrees);
-    setRenderedUrl(null);
-  };
-
-  // Flip = add 180° to Y rotation (shows back/mirrored face)
   const flipHorizontal = () => {
-    if (!selected) return;
-    const cur = selected.data?.yRotation || 0;
-    applyRotateY((cur + 180) % 360);
+    if (!selected || !canvasObjRef.current) return;
+    selected.set({ flipX: !selected.flipX });
+    canvasObjRef.current.renderAll();
+    setRenderedUrl(null);
   };
 
   const sendToBack = () => {
@@ -318,7 +299,7 @@ export default function HomePage() {
     setIsProcessing(true);
     setRenderedUrl(null);
     try {
-      setProcessingMsg("Exportando composición...");
+      setProcessingMsg("Exportando composicion...");
       const imageBase64 = getCompressedImage(1.5);
       setProcessingMsg("Iniciando render IA...");
       const furnitureContext = furniture
@@ -344,7 +325,7 @@ export default function HomePage() {
           const statusRes = await fetch(`/api/status?id=${predictionId}`);
           const { status, imageUrl, error } = await statusRes.json();
           if (status === "succeeded") { setRenderedUrl(imageUrl); break; }
-          if (status === "failed" || status === "canceled") throw new Error(error || "El render falló");
+          if (status === "failed" || status === "canceled") throw new Error(error || "El render fallo");
           setProcessingMsg(`Generando... (${(i + 1) * 3}s)`);
         }
       }
@@ -368,13 +349,6 @@ export default function HomePage() {
     }
     link.click();
   };
-
-  const yPresets = [
-    { deg: 0, label: "Frente" },
-    { deg: 90, label: "→" },
-    { deg: 180, label: "Espalda" },
-    { deg: 270, label: "←" },
-  ];
 
   return (
     <div className="flex flex-col h-screen bg-stone-100 text-stone-900 overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -460,7 +434,7 @@ export default function HomePage() {
               )}
             </section>
 
-            {/* Controls - shown when furniture selected */}
+            {/* Controls */}
             {selected && (
               <section className="border-t border-stone-100 pt-6 space-y-5">
                 <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-stone-400">Ajustes</p>
@@ -477,48 +451,16 @@ export default function HomePage() {
                   />
                 </div>
 
-                {/* Z-Rotation */}
+                {/* Rotation */}
                 <div>
                   <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
-                    <span>Inclinacion</span><span>{rotateVal}deg</span>
+                    <span>Rotacion</span><span>{rotateVal}deg</span>
                   </div>
                   <input
                     type="range" min={-180} max={180} value={rotateVal}
                     onChange={(e) => applyRotate(Number(e.target.value))}
                     className="w-full accent-stone-900"
                   />
-                </div>
-
-                {/* Y-Rotation */}
-                <div>
-                  <div className="flex justify-between text-[9px] tracking-[0.2em] uppercase text-stone-400 mb-2">
-                    <span>Giro propio</span>
-                    <span>{Math.round(rotateYVal)}deg</span>
-                  </div>
-                  <input
-                    type="range" min={0} max={360} value={rotateYVal}
-                    onChange={(e) => applyRotateY(Number(e.target.value))}
-                    className="w-full accent-stone-900"
-                  />
-                  <div className="grid grid-cols-4 gap-1 mt-2">
-                    {yPresets.map(({ deg, label }) => {
-                      const diff = Math.abs(rotateYVal - deg);
-                      const active = diff < 5 || (deg === 0 && rotateYVal > 355);
-                      return (
-                        <button
-                          key={deg}
-                          onClick={() => applyRotateY(deg)}
-                          className={`text-[9px] py-1.5 border tracking-wider transition-all ${
-                            active
-                              ? "border-stone-900 bg-stone-900 text-white"
-                              : "border-stone-200 text-stone-500 hover:border-stone-400"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
 
                 {/* Color tint */}
@@ -608,30 +550,45 @@ export default function HomePage() {
             >
               Descargar
             </button>
-
-            {renderedUrl && (
-              <button
-                onClick={() => setRenderedUrl(null)}
-                className="w-full py-2 text-[9px] text-stone-400 hover:text-stone-900 tracking-[0.2em] uppercase transition-colors"
-              >
-                Editor
-              </button>
-            )}
           </div>
         </aside>
 
-        {/* Canvas area */}
+        {/* Canvas / Render area */}
         <main className="flex-1 flex items-center justify-center bg-stone-100 overflow-hidden p-8">
           {renderedUrl ? (
-            <div className="relative max-w-full max-h-full">
-              <img
-                src={renderedUrl}
-                alt="Render fotorrealista"
-                className="max-w-full max-h-[calc(100vh-100px)] object-contain shadow-sm"
-              />
-              <div className="absolute top-3 left-3 bg-white/90 px-3 py-1.5 text-[9px] text-stone-700 tracking-[0.25em] uppercase">
-                Render completado
+            <div className="flex flex-col items-center gap-4 max-w-full max-h-full">
+              <div className="relative">
+                <img
+                  src={renderedUrl}
+                  alt="Render fotorrealista"
+                  className="max-w-full max-h-[calc(100vh-200px)] object-contain shadow-sm"
+                />
+                <div className="absolute top-3 left-3 bg-white/90 px-3 py-1.5 text-[9px] text-stone-700 tracking-[0.25em] uppercase">
+                  Render completado
+                </div>
               </div>
+
+              {/* Render action buttons */}
+              <div className="flex gap-3">
+                {/* Use render as new base for iterative editing */}
+                <button
+                  onClick={handleUseAsBase}
+                  className="px-5 py-2.5 bg-stone-900 text-white text-[10px] tracking-[0.25em] uppercase hover:bg-stone-700 transition-colors"
+                >
+                  Continuar desde aqui
+                </button>
+                {/* Go back to canvas without changing base */}
+                <button
+                  onClick={() => setRenderedUrl(null)}
+                  className="px-5 py-2.5 border border-stone-400 text-stone-600 text-[10px] tracking-[0.25em] uppercase hover:border-stone-900 hover:text-stone-900 transition-all"
+                >
+                  Volver al editor
+                </button>
+              </div>
+
+              <p className="text-[9px] text-stone-400 tracking-[0.2em] uppercase text-center">
+                Continuar desde aqui carga el render como nueva base para seguir ajustando
+              </p>
             </div>
           ) : (
             <div className="relative">
