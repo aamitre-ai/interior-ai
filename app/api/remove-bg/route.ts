@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { NextRequest, NextResponse } from "next/server";
+import sharp from "sharp";
 
 export const maxDuration = 30;
 
@@ -16,47 +17,85 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "GOOGLE_AI_API_KEY no configurada" }, { status: 500 });
     }
 
-    // Convert uploaded file to base64
-    const buffer = await imageFile.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString("base64");
+    // Step 1: Use Gemini to isolate furniture on pure white background
+    const fileBuffer = await imageFile.arrayBuffer();
+    const fileBase64 = Buffer.from(fileBuffer).toString("base64");
     const mimeType = imageFile.type || "image/jpeg";
 
-    // Use Gemini to extract furniture on white background
     const model = "gemini-2.5-flash-image";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    const res = await fetch(url, {
+    const geminiRes = await fetch(geminiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{
           role: "user",
           parts: [
-            { inlineData: { mimeType, data: base64 } },
-            { text: "Extract only the main furniture piece or product from this image. Place it centered on a pure white background (#FFFFFF). Remove all background elements, floor, walls, shadows, and context. Keep the furniture at its natural proportions and orientation. Output ONLY the furniture isolated on a plain white background. Do not add any text, labels, or watermarks to the image." }
+            { inlineData: { mimeType, data: fileBase64 } },
+            { text: "Extract the main furniture piece from this image and place it on a PURE WHITE background (#FFFFFF). Remove all context, room, floor, walls, and shadows. Keep only the furniture centered at its natural proportions. The background must be pure white with RGB values 255,255,255. No text, no labels, no shadows." }
           ]
         }],
         generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
       }),
     });
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      const errMsg = data?.error?.message || "Gemini API error";
-      return NextResponse.json({ error: errMsg }, { status: 500 });
+    const geminiData = await geminiRes.json();
+    if (!geminiRes.ok) {
+      return NextResponse.json({ error: geminiData?.error?.message || "Gemini error" }, { status: 500 });
     }
 
-    for (const candidate of data.candidates || []) {
+    let geminiBase64 = "";
+    let geminiMime = "image/jpeg";
+    for (const candidate of geminiData.candidates || []) {
       for (const part of candidate.content?.parts || []) {
         if (part.inlineData?.data) {
-          const outMime = part.inlineData.mimeType || "image/jpeg";
-          return NextResponse.json({ image: `data:${outMime};base64,${part.inlineData.data}` });
+          geminiBase64 = part.inlineData.data;
+          geminiMime = part.inlineData.mimeType || "image/jpeg";
         }
       }
     }
 
-    return NextResponse.json({ error: "No se pudo procesar la imagen" }, { status: 500 });
+    if (!geminiBase64) {
+      return NextResponse.json({ error: "Gemini no devolvio imagen" }, { status: 500 });
+    }
+
+    // Step 2: Use sharp to convert white background -> transparent
+    const imgBuffer = Buffer.from(geminiBase64, "base64");
+
+    const { data, info } = await sharp(imgBuffer)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const pixels = new Uint8Array(data);
+    const WHITE_THRESHOLD = 235;
+
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      if (r >= WHITE_THRESHOLD && g >= WHITE_THRESHOLD && b >= WHITE_THRESHOLD) {
+        // Pure white or near-white -> fully transparent
+        pixels[i + 3] = 0;
+      } else {
+        const brightness = (r + g + b) / 3;
+        if (brightness > 200) {
+          // Semi-transparent for edge pixels
+          const alpha = Math.round(255 * (1 - (brightness - 200) / 55));
+          pixels[i + 3] = Math.min(pixels[i + 3], alpha);
+        }
+      }
+    }
+
+    const pngBuffer = await sharp(Buffer.from(pixels.buffer), {
+      raw: { width: info.width, height: info.height, channels: 4 },
+    })
+      .png()
+      .toBuffer();
+
+    const pngBase64 = pngBuffer.toString("base64");
+    return NextResponse.json({ image: `data:image/png;base64,${pngBase64}` });
   } catch (err: any) {
     console.error("Remove-bg error:", err);
     return NextResponse.json({ error: err?.message || "Error interno" }, { status: 500 });
