@@ -55,6 +55,9 @@ export default function HomePage() {
   // Refinement prompt (post-render)
   const [refinementPrompt, setRefinementPrompt] = useState("");
 
+  // Original room photo WITHOUT added furniture — sent as reference to Gemini
+  const [originalRoomBase64, setOriginalRoomBase64] = useState("");
+
   const roomInputRef = useRef<HTMLInputElement>(null);
   const furnitureInputRef = useRef<HTMLInputElement>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +164,7 @@ export default function HomePage() {
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       loadImageAsBackground(dataUrl);
+      setOriginalRoomBase64(dataUrl);
       setRenderedUrl(null);
     };
     reader.readAsDataURL(file);
@@ -179,6 +183,7 @@ export default function HomePage() {
     setFurniture([]);
     setSelected(null);
     loadImageAsBackground(renderedUrl);
+    setOriginalRoomBase64(renderedUrl);
     setRenderedUrl(null);
     setRefinementPrompt("");
   };
@@ -358,7 +363,8 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageBase64,
-          furnitureContext,
+          originalRoomBase64: originalRoomBase64 || undefined,
+          furnitureContext: furnitureContext || undefined,
           selectedStyle,
           referencePhotoBase64,
           initialPrompt: initialPrompt.trim() || undefined,
