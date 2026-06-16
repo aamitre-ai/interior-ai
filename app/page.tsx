@@ -11,6 +11,15 @@ interface FurnitureItem {
   direction?: string;
 }
 
+interface Annotation {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+}
+
 const STYLES = [
   { id: "nordico", label: "Nórdico", desc: "Madera clara, blanco, minimalismo" },
   { id: "industrial", label: "Industrial", desc: "Metal, madera oscura, ladrillo visto" },
@@ -57,6 +66,12 @@ export default function HomePage() {
 
   // Original room photo WITHOUT added furniture — sent as reference to Gemini
   const [originalRoomBase64, setOriginalRoomBase64] = useState("");
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [drawingAnn, setDrawingAnn] = useState<{x:number;y:number;w:number;h:number}|null>(null);
+  const annStartRef = useRef<{x:number;y:number}|null>(null);
+  const isAnnotatingRef = useRef(false);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const roomInputRef = useRef<HTMLInputElement>(null);
   const furnitureInputRef = useRef<HTMLInputElement>(null);
@@ -170,7 +185,68 @@ export default function HomePage() {
         canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL("image/jpeg", quality));
       };
-      img.src = dataUrl;
+      useEffect(() => { isAnnotatingRef.current = isAnnotating; }, [isAnnotating]);
+
+  const exportWithAnnotations = (baseDataUrl: string): Promise<string> => {
+    if (annotations.length === 0) return Promise.resolve(baseDataUrl);
+    return new Promise((resolve) => {
+      const overlay = overlayRef.current;
+      const divW = overlay?.clientWidth || 1, divH = overlay?.clientHeight || 1;
+      const img2 = new Image();
+      img2.onload = () => {
+        const c = document.createElement("canvas");
+        c.width = img2.width; c.height = img2.height;
+        const ctx = c.getContext("2d")!;
+        ctx.drawImage(img2, 0, 0);
+        const sx = img2.width / divW, sy = img2.height / divH;
+        annotations.forEach((ann) => {
+          const rx = ann.x*sx, ry = ann.y*sy, rw = ann.w*sx, rh = ann.h*sy;
+          ctx.fillStyle = "rgba(255,140,0,0.22)";
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeStyle = "#FF6B00"; ctx.lineWidth = Math.max(2, sx*2);
+          ctx.setLineDash([6,3]); ctx.strokeRect(rx, ry, rw, rh); ctx.setLineDash([]);
+          const fs = Math.max(14, Math.round(15*sx));
+          ctx.font = "bold " + fs + "px Arial";
+          const labelText = "\u2192 " + ann.label;
+          const tw = ctx.measureText(labelText).width;
+          ctx.fillStyle = "rgba(0,0,0,0.65)";
+          ctx.fillRect(rx+2, ry+2, Math.min(rw-4, tw+10), fs+6);
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillText(labelText, rx+6, ry+fs+2);
+        });
+        resolve(c.toDataURL("image/jpeg", 0.92));
+      };
+      img2.src = baseDataUrl;
+    });
+  };
+
+  const handleAnnPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isAnnotatingRef.current) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const r = e.currentTarget.getBoundingClientRect();
+    annStartRef.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+    setDrawingAnn({ x: e.clientX - r.left, y: e.clientY - r.top, w: 0, h: 0 });
+  };
+
+  const handleAnnPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!annStartRef.current || !isAnnotatingRef.current) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    const s = annStartRef.current;
+    setDrawingAnn({ x: Math.min(cx, s.x), y: Math.min(cy, s.y), w: Math.abs(cx-s.x), h: Math.abs(cy-s.y) });
+  };
+
+  const handleAnnPointerUp = () => {
+    if (!annStartRef.current || !isAnnotatingRef.current) return;
+    const ann = drawingAnn;
+    annStartRef.current = null; setDrawingAnn(null);
+    if (!ann || ann.w < 20 || ann.h < 20) return;
+    const label = window.prompt("\u00bfQu\u00e9 va en esta zona?\n(ej: TV aqu\u00ed, Sof\u00e1, No tocar)", "");
+    if (!label?.trim()) return;
+    setAnnotations((prev) => [...prev, { id: Date.now().toString(), ...ann, label: label.trim() }]);
+  };
+
+  img.src = dataUrl;
     });
 
   const handleRoomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -368,7 +444,8 @@ export default function HomePage() {
     setRenderedUrl(null);
     try {
       setProcessingMsg("Exportando composicion...");
-      const imageBase64 = getCompressedImage(1.5);
+      const rawCanvas = getCompressedImage(1.5);
+      const imageBase64 = await exportWithAnnotations(rawCanvas);
       setProcessingMsg("Iniciando render IA...");
       const furnitureContext = furniture
         .filter((f) => f.direction)
@@ -381,6 +458,7 @@ export default function HomePage() {
           imageBase64,
           originalRoomBase64: originalRoomBase64 || undefined,
           furnitureContext: furnitureContext || undefined,
+          annotationContext: annotations.length > 0 ? annotations.map(a => a.label).join("; ") : undefined,
           selectedStyle,
           referencePhotoBase64,
           initialPrompt: initialPrompt.trim() || undefined,
@@ -521,6 +599,25 @@ export default function HomePage() {
                 {roomLoaded ? "Foto cargada" : "Subir foto"}
               </button>
               <input ref={roomInputRef} type="file" accept="image/*" className="hidden" onChange={handleRoomUpload} />
+            <button
+              onClick={() => setIsAnnotating((v) => !v)}
+              disabled={!roomLoaded}
+              className={`w-full mt-2 border py-3 text-center text-[10px] tracking-[0.2em] uppercase transition-all ${isAnnotating ? "border-orange-400 bg-orange-50 text-orange-700" : "border-stone-200 hover:border-stone-400 text-stone-500"}`}>
+              {isAnnotating ? "\u2713 Dibujando zonas..." : "\u270f Anotar zona"}
+            </button>
+            {annotations.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {annotations.map((ann) => (
+                  <div key={ann.id} className="flex items-center justify-between border border-orange-200 bg-orange-50 px-2 py-1 text-[10px]">
+                    <span className="text-orange-700 truncate">&#8594; {ann.label}</span>
+                    <button onClick={() => setAnnotations((prev) => prev.filter((a) => a.id !== ann.id))}
+                      className="text-stone-400 hover:text-red-500 ml-2 flex-shrink-0">&#x2715;</button>
+                  </div>
+                ))}
+                <button onClick={() => setAnnotations([])} className="text-[9px] text-stone-400 hover:text-red-500 tracking-wider uppercase w-full text-center mt-1">
+                  Borrar todas</button>
+              </div>
+            )}
             </section>
 
             {/* Style suggestions */}
@@ -774,6 +871,29 @@ export default function HomePage() {
           {/* Canvas — always in DOM to preserve Fabric state */}
           <div className={`relative ${renderedUrl ? "hidden" : ""}`}>
             <div ref={canvasRef} className="shadow-sm overflow-hidden" />
+            {roomLoaded && (
+              <div ref={overlayRef} className="absolute inset-0"
+                style={{ cursor: isAnnotating ? "crosshair" : "default", pointerEvents: isAnnotating ? "auto" : "none" }}
+                onPointerDown={handleAnnPointerDown}
+                onPointerMove={handleAnnPointerMove}
+                onPointerUp={handleAnnPointerUp}>
+                <svg width="100%" height="100%" style={{ position: "absolute", inset: 0 }}>
+                  {annotations.map((ann) => (
+                    <g key={ann.id}>
+                      <rect x={ann.x} y={ann.y} width={ann.w} height={ann.h}
+                        fill="rgba(255,140,0,0.18)" stroke="#FF6B00" strokeWidth="2" strokeDasharray="6 3" />
+                      <rect x={ann.x+2} y={ann.y+2} width={Math.min(ann.w-4, ann.label.length*8+14)} height="22"
+                        fill="rgba(0,0,0,0.6)" rx="2" />
+                      <text x={ann.x+7} y={ann.y+16} fill="white" fontSize="12" fontWeight="bold">&#8594; {ann.label}</text>
+                    </g>
+                  ))}
+                  {drawingAnn && (
+                    <rect x={drawingAnn.x} y={drawingAnn.y} width={drawingAnn.w} height={drawingAnn.h}
+                      fill="rgba(255,140,0,0.12)" stroke="#FF6B00" strokeWidth="2" strokeDasharray="5 3" />
+                  )}
+                </svg>
+              </div>
+            )}
             {!roomLoaded && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="text-center text-stone-300">
