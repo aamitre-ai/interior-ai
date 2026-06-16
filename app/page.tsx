@@ -392,7 +392,8 @@ export default function HomePage() {
       }
       const { predictionId, imageUrl: directImageUrl } = await res.json();
       if (directImageUrl) {
-        setRenderedUrl(directImageUrl);
+        const compressed = await compressDataUrl(directImageUrl, 1200, 0.88);
+        setRenderedUrl(compressed);
       } else {
         setProcessingMsg("Procesando con IA...");
         for (let i = 0; i < 60; i++) {
@@ -419,11 +420,12 @@ export default function HomePage() {
     setRenderedUrl(null);
     try {
       setProcessingMsg("Refinando render...");
+      const compressedRender = await compressDataUrl(currentRender, 1024, 0.85);
       const res = await fetch("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageBase64: currentRender,
+          imageBase64: compressedRender,
           furnitureContext: "",
           selectedStyle,
           referencePhotoBase64,
