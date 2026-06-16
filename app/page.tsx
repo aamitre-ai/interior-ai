@@ -157,6 +157,22 @@ export default function HomePage() {
     });
   };
 
+
+  // Compress a data URL to max ~1024px wide, JPEG quality 0.75 (~200-400KB)
+  const compressDataUrl = (dataUrl: string, maxPx = 1024, quality = 0.75): Promise<string> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = dataUrl;
+    });
+
   const handleRoomUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -164,7 +180,7 @@ export default function HomePage() {
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       loadImageAsBackground(dataUrl);
-      setOriginalRoomBase64(dataUrl);
+      compressDataUrl(dataUrl).then(setOriginalRoomBase64);
       setRenderedUrl(null);
     };
     reader.readAsDataURL(file);
@@ -183,7 +199,7 @@ export default function HomePage() {
     setFurniture([]);
     setSelected(null);
     loadImageAsBackground(renderedUrl);
-    setOriginalRoomBase64(renderedUrl);
+    compressDataUrl(renderedUrl).then(setOriginalRoomBase64);
     setRenderedUrl(null);
     setRefinementPrompt("");
   };
