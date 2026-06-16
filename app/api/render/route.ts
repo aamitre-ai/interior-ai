@@ -2,16 +2,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const STYLE_PROMPTS = {
-  nordico: "Scandinavian Nordic style: light birch wood, white and cream tones, minimalist furniture, cozy textiles, natural light",
-  industrial: "Industrial style: exposed brick, dark steel, reclaimed wood, Edison bulbs, raw concrete surfaces",
-  minimalista: "Minimalist style: clean lines, neutral palette of whites and grays, uncluttered space, functional furniture",
-  mediterraneo: "Mediterranean style: terracotta tiles, warm ochre walls, linen fabrics, arched doorways, natural materials",
-  japandi: "Japandi style (Japanese-Scandinavian fusion): wabi-sabi aesthetics, natural wood, muted earthy tones, zen simplicity",
-  bohemio: "Bohemian style: layered colorful textiles, eclectic mix of patterns, macrame, indoor plants, warm jewel tones",
-  art_deco: "Art Deco style: geometric patterns, luxurious gold accents, velvet upholstery, mirrored surfaces, bold symmetry",
-  rustico: "Rustic style: rough-hewn wood beams, stone walls, warm amber lighting, handcrafted elements, natural materials",
-  clasico: "Classic elegant style: refined furniture, warm neutral tones, crown molding, tasteful artwork, balanced symmetry",
-  contemporaneo: "Contemporary style: current design trends, mix of neutral base with accent colors, clean silhouettes, curated decor",
+  nordico: "Scandinavian Nordic: light birch wood tones, white and cream wall paint, linen and wool textures on existing fabrics, soft natural lighting",
+  industrial: "Industrial: dark charcoal and matte black finishes, exposed concrete wall texture, raw steel and iron tones on metal elements, warm Edison-bulb lighting",
+  minimalista: "Minimalist: pure white walls, warm grey floor finish, neutral beige and stone tones on all surfaces, clean diffused lighting",
+  mediterraneo: "Mediterranean: warm terracotta and ochre wall paint, aged stone or clay floor finish, warm sandy tones on fabrics, golden hour lighting",
+  japandi: "Japandi (Japanese-Scandinavian): warm sand and ash wood tones, muted sage and clay on fabrics, wabi-sabi natural textures, calm indirect lighting",
+  bohemio: "Bohemian: warm terracotta and rust wall paint, layered earthy fabric textures in jewel tones, patterned textiles on existing upholstery, warm ambient lighting",
+  art_deco: "Art Deco: deep emerald green or navy walls with gold trim accents, velvet textures in deep tones on existing upholstery, geometric patterns on surfaces, dramatic accent lighting",
+  rustico: "Rustic: warm amber wood stain on existing wood, rough plaster or stone wall finish, deep earth tones on fabrics, warm candlelight-style lighting",
+  clasico: "Classic elegant: warm cream and ivory wall paint, polished wood finishes, rich warm fabric tones on upholstery, balanced warm lighting",
+  contemporaneo: "Contemporary: warm greige walls, mixed matte and gloss surface finishes, neutral tones with one accent color on existing fabrics, bright even lighting",
 };
 
 export async function POST(req: NextRequest) {
@@ -31,51 +31,54 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "GOOGLE_AI_API_KEY no configurada" }, { status: 500 });
     }
 
-    const styleDesc = STYLE_PROMPTS[selectedStyle] || "Modern contemporary interior design";
+    const styleDesc = STYLE_PROMPTS[selectedStyle] || "Contemporary modern: warm neutral tones, clean finishes, balanced lighting";
 
     let prompt: string;
     if (isRefinement && refinementPrompt) {
-      prompt = `You are an expert interior designer editing a photo-realistic room render.
-
-TASK: Apply ONLY these specific changes to the existing render, keeping everything else identical:
+      prompt = `You are retouching an interior design render. Apply ONLY these specific changes:
 ${refinementPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n")}
 
-STRICT RULES:
-- Keep the EXACT same camera angle, perspective, room dimensions, and spatial layout
-- Keep the same aspect ratio and image size
-- Only change what is explicitly listed above
-- Do NOT add text, labels, watermarks, or any typography to the image`;
+ABSOLUTE RULES — violation is not acceptable:
+- Do NOT add any new objects, furniture, plants, or accessories
+- Do NOT remove any existing objects
+- Do NOT change the room layout, camera angle, or proportions
+- Do NOT add any text, labels, or watermarks to the image
+Only apply the listed changes above to existing elements.`;
     } else {
-      const furnitureSection = furnitureContext
-        ? `\n\nFurniture already placed in the room (keep these in their exact positions):\n${furnitureContext}`
-        : "";
-
-      const designElements = initialPrompt
-        ? `\n\nSpecific elements to add to the room:\n${initialPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n") || "- " + initialPrompt}`
+      const userAdditions = initialPrompt
+        ? `\n\nThe user also wants these specific elements added or changed:\n${initialPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n") || "- " + initialPrompt}`
         : "";
 
       const refPhotoSection = referencePhotoBase64
-        ? "\n\nMatch the aesthetic and color palette of the second reference photo provided."
+        ? "\n\nUse the second reference photo as a color/texture guide only."
         : "";
 
-      prompt = `You are an expert interior designer. Your task is to EDIT the provided room photo by restyling its interior.
+      prompt = `You are a photo-realistic interior design renderer. Your task is to RESTYLE the existing room by changing only surfaces, colors, materials, and finishes — NOT by adding or removing any objects.
 
-CRITICAL CONSTRAINT — PRESERVE EXACTLY:
-- The IDENTICAL camera angle and perspective
-- The EXACT same room dimensions, proportions, and spatial layout  
-- The SAME field of view — do not zoom in or out
-- The SAME wall positions, window locations, and door positions
-- The SAME aspect ratio — do not crop or change image dimensions
-You are EDITING this specific room, not creating a new one. The room structure is fixed.
+INPUT: A photo of an existing room with specific furniture and objects in it.
 
 STYLE TO APPLY: ${styleDesc}
-Replace all furniture, materials, colors, and decor with this style while preserving the room geometry.${designElements}${furnitureSection}${refPhotoSection}
 
-VISUAL QUALITY:
-- Photo-realistic render with proper lighting, shadows, and reflections
-- Professional architectural visualization quality
+WHAT YOU MUST CHANGE (surfaces and finishes only):
+- Wall paint color and texture/material
+- Floor material and finish color
+- Ceiling color if visible
+- Fabric color and texture on ALL existing upholstered furniture (sofas, chairs, cushions, curtains)
+- Wood stain/finish color on ALL existing wood furniture
+- Metal finish on ALL existing metal elements
+- Overall lighting mood and color temperature${userAdditions}${refPhotoSection}
 
-OUTPUT RULE: The image must contain ZERO text, ZERO labels, ZERO watermarks, ZERO typography. Pure room visualization only.`;
+WHAT YOU MUST NEVER DO:
+- Do NOT add any new furniture, chairs, tables, sofas, lamps, or any object not visible in the original photo
+- Do NOT add plants, rugs, artwork, pillows, vases, books, or any decorative accessories
+- Do NOT remove any existing furniture or objects
+- Do NOT move any existing furniture from its current position
+- Do NOT change the camera angle, perspective, room layout, or image proportions
+- Do NOT add text, labels, watermarks, or any typography to the image
+
+The final render must contain the exact same objects as the original photo, in the exact same positions, restyled with the chosen color palette and finishes.
+
+OUTPUT: One photo-realistic render of the same room with restyled surfaces, colors, and materials only.`;
     }
 
     const toInlinePart = (dataUrl: string) => {
