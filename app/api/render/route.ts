@@ -35,41 +35,47 @@ export async function POST(req: NextRequest) {
 
     let prompt: string;
     if (isRefinement && refinementPrompt) {
-      prompt = `You are an expert interior designer creating a photo-realistic architectural visualization.
+      prompt = `You are an expert interior designer editing a photo-realistic room render.
 
-TASK: Apply the following modifications to the interior design shown:
+TASK: Apply ONLY these specific changes to the existing render, keeping everything else identical:
 ${refinementPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n")}
 
-RULES:
-- Apply all listed changes precisely in the physical space
-- Maintain photo-realistic quality, composition, and lighting
-- Keep the same room architecture and dimensions
-- OUTPUT RULE: The final image must contain ZERO text, ZERO labels, ZERO captions, ZERO watermarks, ZERO words of any kind. Pure architectural visualization only.`;
+STRICT RULES:
+- Keep the EXACT same camera angle, perspective, room dimensions, and spatial layout
+- Keep the same aspect ratio and image size
+- Only change what is explicitly listed above
+- Do NOT add text, labels, watermarks, or any typography to the image`;
     } else {
       const furnitureSection = furnitureContext
-        ? `\nExisting furniture detected in the room (keep or complement):\n${furnitureContext}`
+        ? `\n\nFurniture already placed in the room (keep these in their exact positions):\n${furnitureContext}`
         : "";
 
       const designElements = initialPrompt
-        ? `\n\nAdditional design elements to physically incorporate into the room:\n${initialPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n") || "- " + initialPrompt}`
+        ? `\n\nSpecific elements to add to the room:\n${initialPrompt.split(/[,.]/).filter(Boolean).map((s) => "- " + s.trim()).join("\n") || "- " + initialPrompt}`
         : "";
 
       const refPhotoSection = referencePhotoBase64
-        ? "\n\nMatch the aesthetic, color palette, and mood of the reference photo provided as the second image."
+        ? "\n\nMatch the aesthetic and color palette of the second reference photo provided."
         : "";
 
-      prompt = `You are an expert interior designer creating a photo-realistic architectural visualization.
+      prompt = `You are an expert interior designer. Your task is to EDIT the provided room photo by restyling its interior.
 
-TASK: Transform the room in the provided photo into a ${styleDesc} design.${designElements}${furnitureSection}${refPhotoSection}
+CRITICAL CONSTRAINT — PRESERVE EXACTLY:
+- The IDENTICAL camera angle and perspective
+- The EXACT same room dimensions, proportions, and spatial layout  
+- The SAME field of view — do not zoom in or out
+- The SAME wall positions, window locations, and door positions
+- The SAME aspect ratio — do not crop or change image dimensions
+You are EDITING this specific room, not creating a new one. The room structure is fixed.
 
-DESIGN REQUIREMENTS:
-- Preserve the room architecture: walls, windows, doors, floor layout
-- Apply the ${styleDesc} throughout: all furniture, materials, colors, lighting fixtures
-- Add style-appropriate accessories, plants, rugs, and artwork
-- Photo-realistic lighting with shadows, reflections, and depth
-- Professional architectural render quality
+STYLE TO APPLY: ${styleDesc}
+Replace all furniture, materials, colors, and decor with this style while preserving the room geometry.${designElements}${furnitureSection}${refPhotoSection}
 
-CRITICAL OUTPUT RULE: The rendered image must contain absolutely NO text, NO words, NO labels, NO numbers, NO captions, NO watermarks, NO signs, NO typography of any kind. Produce a pure photo-realistic room visualization with only physical design elements visible.`;
+VISUAL QUALITY:
+- Photo-realistic render with proper lighting, shadows, and reflections
+- Professional architectural visualization quality
+
+OUTPUT RULE: The image must contain ZERO text, ZERO labels, ZERO watermarks, ZERO typography. Pure room visualization only.`;
     }
 
     const toInlinePart = (dataUrl: string) => {
